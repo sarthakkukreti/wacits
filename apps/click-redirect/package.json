@@ -1,0 +1,15 @@
+{
+  "name": "@wacits/click-redirect",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "@wacits/db": "workspace:*",
+    "drizzle-orm": ">=0.45.2",
+    "hono": "^4.12.0"
+  }
+}

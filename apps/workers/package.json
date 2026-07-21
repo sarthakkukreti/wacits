@@ -1,0 +1,21 @@
+{
+  "name": "@wacits/workers",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:send": "bun run --watch src/send-worker.ts",
+    "dev:import": "bun run --watch src/import-worker.ts",
+    "dev:scheduler": "bun run --watch src/scheduler-worker.ts",
+    "start:send": "bun run src/send-worker.ts",
+    "start:import": "bun run src/import-worker.ts",
+    "start:scheduler": "bun run src/scheduler-worker.ts"
+  },
+  "dependencies": {
+    "@wacits/db": "workspace:*",
+    "@wacits/queue": "workspace:*",
+    "@wacits/shared": "workspace:*",
+    "bullmq": ">=5.80.9",
+    "drizzle-orm": ">=0.45.2"
+  }
+}

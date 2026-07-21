@@ -1,0 +1,25 @@
+{
+  "name": "@wacits/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun run src/migrate.ts",
+    "db:security-setup": "bun run src/db-security-setup.ts",
+    "db:seed": "bun run seed/seed.ts",
+    "db:studio": "drizzle-kit studio",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@wacits/shared": "workspace:*",
+    "drizzle-orm": ">=0.45.2",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.0",
+    "@types/bun": "latest"
+  }
+}

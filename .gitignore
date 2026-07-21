@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.local
+*.log
+dist/
+build/
+.next/
+.turbo/
+.DS_Store
+*.tsbuildinfo
+# This project standardizes on Bun (bun.lock); Next.js's dev server can
+# auto-install a stray pnpm lockfile the first time it runs.
+pnpm-lock.yaml

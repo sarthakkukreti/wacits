@@ -1,0 +1,139 @@
+# PRD §4.1 — every process runs as a separately restartable container.
+# TS-1: every image tag is pinned exactly; `latest` must never appear here.
+#
+# NOTE: postgres/valkey patch tags below were chosen at scaffold time and
+# have not been re-verified against the current release feed — confirm the
+# latest patch before a real deployment (same discipline as the [Verify
+# before build] markers in docs/PRD.md).
+
+services:
+  postgres:
+    image: postgres:16.6
+    environment:
+      POSTGRES_USER: wacits
+      POSTGRES_PASSWORD: wacits_dev_password
+      POSTGRES_DB: wacits
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wacits"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  valkey:
+    image: valkey/valkey:8.0.2
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://wacits:wacits_dev_password@postgres:5432/wacits
+      REDIS_URL: redis://valkey:6379
+    ports:
+      - "8787:8787"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+
+  webhook:
+    build:
+      context: .
+      dockerfile: apps/webhook/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://wacits:wacits_dev_password@postgres:5432/wacits
+    ports:
+      - "8788:8788"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  click-redirect:
+    build:
+      context: .
+      dockerfile: apps/click-redirect/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://wacits:wacits_dev_password@postgres:5432/wacits
+    ports:
+      - "8789:8789"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker-send:
+    build:
+      context: .
+      dockerfile: apps/workers/Dockerfile
+    command: ["bun", "run", "start:send"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://wacits:wacits_dev_password@postgres:5432/wacits
+      REDIS_URL: redis://valkey:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+
+  worker-import:
+    build:
+      context: .
+      dockerfile: apps/workers/Dockerfile
+    command: ["bun", "run", "start:import"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://wacits:wacits_dev_password@postgres:5432/wacits
+      REDIS_URL: redis://valkey:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+
+  worker-scheduler:
+    build:
+      context: .
+      dockerfile: apps/workers/Dockerfile
+    command: ["bun", "run", "start:scheduler"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://wacits:wacits_dev_password@postgres:5432/wacits
+      REDIS_URL: redis://valkey:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    env_file: .env
+    environment:
+      API_INTERNAL_URL: http://api:8787
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  valkey_data:

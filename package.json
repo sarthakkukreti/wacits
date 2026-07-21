@@ -1,0 +1,24 @@
+{
+  "name": "wacits",
+  "private": true,
+  "version": "0.1.0",
+  "description": "CITS WhatsApp Communication Manager",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "db:generate": "cd packages/db && bun run db:generate",
+    "db:migrate": "cd packages/db && bun run db:migrate",
+    "db:security-setup": "cd packages/db && bun run db:security-setup",
+    "db:seed": "cd packages/db && bun run db:seed",
+    "dev:api": "cd apps/api && bun run dev",
+    "dev:webhook": "cd apps/webhook && bun run dev",
+    "dev:click-redirect": "cd apps/click-redirect && bun run dev",
+    "dev:web": "cd apps/web && bun run dev",
+    "dev:workers": "cd apps/workers && bun run dev:send & cd apps/workers && bun run dev:import & cd apps/workers && bun run dev:scheduler"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}
