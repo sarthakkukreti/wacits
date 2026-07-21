@@ -1,0 +1,44 @@
+# Reverse proxy for the CITS WhatsApp Communication Manager.
+#
+# WACITS_DOMAIN comes from .env (Caddy reads {$VAR} from its own process
+# environment — see the caddy service's env_file in docker-compose.yml).
+# Caddy obtains and renews a Let's Encrypt certificate for this domain
+# automatically via the HTTP-01 challenge on port 80, so port 80 must
+# actually reach this container from the public internet — if the DNS
+# record is proxied through Cloudflare (the orange cloud), either switch it
+# to "DNS only" (grey cloud) or configure Caddy's Cloudflare DNS-01 plugin
+# instead. Plain "DNS only" is the simpler starting point.
+#
+# Only ONE subdomain has been provisioned (wacits.cyberlative.com), so this
+# routes by PATH rather than by separate subdomains. That is a deliberate
+# compromise against the PRD's own preference (§16 Click tracking) for a
+# dedicated, clean domain for click-tracking links — reusing the app's own
+# domain for /c/* is fine to start with, but revisit if click-through
+# reputation on this domain ever becomes a concern.
+
+{$WACITS_DOMAIN} {
+	# Meta's webhook callback URL is https://{$WACITS_DOMAIN}/webhook —
+	# strip the /webhook prefix before forwarding, since the webhook
+	# receiver itself listens on "/" (see apps/webhook/src/index.ts).
+	handle_path /webhook* {
+		reverse_proxy webhook:8788
+	}
+
+	# Click-tracking redirects: https://{$WACITS_DOMAIN}/c/<token> — do
+	# NOT strip the prefix here, the click-redirect app's own route is
+	# "/c/:token" (see apps/click-redirect/src/index.ts).
+	handle /c/* {
+		reverse_proxy click-redirect:8789
+	}
+
+	# Everything else goes to the Next.js dashboard.
+	handle {
+		reverse_proxy web:3000
+	}
+
+	encode gzip
+	log {
+		output stdout
+		format json
+	}
+}

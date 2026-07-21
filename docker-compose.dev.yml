@@ -1,0 +1,31 @@
+# Local-debugging override — layer this on top of docker-compose.yml when
+# you want to run the FULL containerized stack on a dev machine and hit
+# each service directly by port, without going through Caddy:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# Not needed for day-to-day local development — the RUNBOOK's normal flow
+# (running each app directly with `bun run dev:*` against a local Postgres/
+# Redis) is faster to iterate on and is what this project has actually been
+# verified against. Use this file only when you specifically want to
+# exercise the Docker images themselves. Never use this file on the
+# production server — it republishes Postgres and Valkey to the host.
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+  valkey:
+    ports:
+      - "6379:6379"
+  api:
+    ports:
+      - "8787:8787"
+  webhook:
+    ports:
+      - "8788:8788"
+  click-redirect:
+    ports:
+      - "8789:8789"
+  web:
+    ports:
+      - "3000:3000"

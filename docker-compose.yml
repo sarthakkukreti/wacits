@@ -1,32 +1,40 @@
 # PRD §4.1 — every process runs as a separately restartable container.
 # TS-1: every image tag is pinned exactly; `latest` must never appear here.
 #
-# NOTE: postgres/valkey patch tags below were chosen at scaffold time and
-# have not been re-verified against the current release feed — confirm the
-# latest patch before a real deployment (same discipline as the [Verify
-# before build] markers in docs/PRD.md).
+# NOTE: postgres/valkey/caddy patch tags below were chosen at scaffold time
+# and have not been re-verified against the current release feed — confirm
+# the latest patch before a real deployment (same discipline as the
+# [Verify before build] markers in docs/PRD.md).
+#
+# Production security shape: Caddy is the ONLY service that publishes a
+# port to the host (80/443). Postgres, Valkey, the API, the webhook
+# receiver, click-redirect and the web app are reachable only on the
+# internal Docker network, by service name. This is deliberate — see the
+# RUNBOOK's "Production deployment" section for why, and
+# docker-compose.dev.yml for the local-debugging override that republishes
+# these ports on a developer machine.
+#
+# Postgres credentials come from .env (never hardcode them here — this file
+# is committed to git). Copy .env.example and set real values before
+# running this in anything but a throwaway environment.
 
 services:
   postgres:
     image: postgres:16.6
     environment:
-      POSTGRES_USER: wacits
-      POSTGRES_PASSWORD: wacits_dev_password
-      POSTGRES_DB: wacits
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-wacits}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-wacits}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U wacits"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wacits}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   valkey:
     image: valkey/valkey:8.0.2
-    ports:
-      - "6379:6379"
     volumes:
       - valkey_data:/data
     healthcheck:
@@ -41,10 +49,13 @@ services:
       dockerfile: apps/api/Dockerfile
     env_file: .env
     environment:
-      DATABASE_URL: postgres://wacits:wacits_dev_password@postgres:5432/wacits
+      DATABASE_URL: postgres://${POSTGRES_USER:-wacits}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wacits}
       REDIS_URL: redis://valkey:6379
-    ports:
-      - "8787:8787"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:8787/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,9 +68,12 @@ services:
       dockerfile: apps/webhook/Dockerfile
     env_file: .env
     environment:
-      DATABASE_URL: postgres://wacits:wacits_dev_password@postgres:5432/wacits
-    ports:
-      - "8788:8788"
+      DATABASE_URL: postgres://${POSTGRES_USER:-wacits}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wacits}
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:8788/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,9 +84,12 @@ services:
       dockerfile: apps/click-redirect/Dockerfile
     env_file: .env
     environment:
-      DATABASE_URL: postgres://wacits:wacits_dev_password@postgres:5432/wacits
-    ports:
-      - "8789:8789"
+      DATABASE_URL: postgres://${POSTGRES_USER:-wacits}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wacits}
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:8789/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,7 +101,7 @@ services:
     command: ["bun", "run", "start:send"]
     env_file: .env
     environment:
-      DATABASE_URL: postgres://wacits:wacits_dev_password@postgres:5432/wacits
+      DATABASE_URL: postgres://${POSTGRES_USER:-wacits}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wacits}
       REDIS_URL: redis://valkey:6379
     depends_on:
       postgres:
@@ -99,7 +116,7 @@ services:
     command: ["bun", "run", "start:import"]
     env_file: .env
     environment:
-      DATABASE_URL: postgres://wacits:wacits_dev_password@postgres:5432/wacits
+      DATABASE_URL: postgres://${POSTGRES_USER:-wacits}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wacits}
       REDIS_URL: redis://valkey:6379
     depends_on:
       postgres:
@@ -114,7 +131,7 @@ services:
     command: ["bun", "run", "start:scheduler"]
     env_file: .env
     environment:
-      DATABASE_URL: postgres://wacits:wacits_dev_password@postgres:5432/wacits
+      DATABASE_URL: postgres://${POSTGRES_USER:-wacits}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wacits}
       REDIS_URL: redis://valkey:6379
     depends_on:
       postgres:
@@ -129,11 +146,35 @@ services:
     env_file: .env
     environment:
       API_INTERNAL_URL: http://api:8787
-    ports:
-      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       - api
+
+  # Reverse proxy + automatic HTTPS. This is the ONLY service exposed to the
+  # host. See ./Caddyfile for the routing rules under wacits.cyberlative.com
+  # — path-based, since only one subdomain has been provisioned so far (see
+  # RUNBOOK.md for the tradeoff this implies for click tracking, §16).
+  caddy:
+    image: caddy:2.8.4-alpine
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - webhook
+      - click-redirect
 
 volumes:
   postgres_data:
   valkey_data:
+  caddy_data:
+  caddy_config:
