@@ -76,6 +76,20 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-wacits}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wacits}
       REDIS_URL: redis://valkey:6379
+    # Alias below is what the caddy service actually dials (see Caddyfile).
+    # Necessary because caddy also joins Coolify's shared `coolify` network
+    # (see caddy service, further down) to be reachable by Traefik — and on
+    # that network, a bare "api" is NOT unique: other apps deployed via this
+    # same Coolify instance can (and do — see irfcrmsi) name their own
+    # service "api" too, so Docker's embedded DNS can resolve the plain name
+    # ambiguously/inconsistently to the wrong container across requests
+    # (confirmed live: caddy's own logs showed "connection refused" dialing
+    # two different IPs for hostname "api" on different requests). A
+    # project-scoped alias sidesteps the collision entirely.
+    networks:
+      default:
+        aliases:
+          - wacits-api
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://localhost:8787/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -94,6 +108,11 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-wacits}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wacits}
+    # See the `api` service above for why this alias exists.
+    networks:
+      default:
+        aliases:
+          - wacits-webhook
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://localhost:8788/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -110,6 +129,11 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-wacits}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wacits}
+    # See the `api` service above for why this alias exists.
+    networks:
+      default:
+        aliases:
+          - wacits-click-redirect
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://localhost:8789/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s

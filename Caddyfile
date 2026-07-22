@@ -18,26 +18,37 @@
 # a dedicated domain of their own — a deliberate compromise since only this
 # one backend subdomain exists today (PRD §16 would prefer a clean domain
 # for click-through reputation; revisit if that becomes a real concern).
+#
+# reverse_proxy targets below use the wacits-* aliases (docker-compose.yml),
+# NOT the plain service names ("api"/"webhook"/"click-redirect"). This
+# container also joins Coolify's shared `coolify` Docker network so
+# Traefik can reach it (see docker-compose.yml), and on that network a
+# bare name like "api" is not unique — other apps on the same Coolify
+# instance can (and do) name their own service "api" too, which made
+# Docker's embedded DNS resolve the plain name to the wrong container
+# inconsistently across requests (confirmed via this container's own
+# access logs: "connection refused" dialing two different IPs for the
+# same hostname). The wacits-* aliases are project-scoped and unambiguous.
 
 :80 {
 	# Meta's webhook callback URL is https://api.wacits.cyberlative.com/webhook
 	# — strip the /webhook prefix before forwarding, since the webhook
 	# receiver itself listens on "/" (see apps/webhook/src/index.ts).
 	handle_path /webhook* {
-		reverse_proxy webhook:8788
+		reverse_proxy wacits-webhook:8788
 	}
 
 	# Click-tracking redirects: https://api.wacits.cyberlative.com/c/<token>
 	# — do NOT strip the prefix here, the click-redirect app's own route is
 	# "/c/:token" (see apps/click-redirect/src/index.ts).
 	handle /c/* {
-		reverse_proxy click-redirect:8789
+		reverse_proxy wacits-click-redirect:8789
 	}
 
 	# Everything else is the API, called cross-origin by the Next.js app
 	# running on Hostinger (see CORS_ORIGIN in apps/api/src/index.ts).
 	handle {
-		reverse_proxy api:8787
+		reverse_proxy wacits-api:8787
 	}
 
 	encode gzip
