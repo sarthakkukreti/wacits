@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { client, contact, db, withSystemAccess, withTenant } from "@wacits/db";
 import { eq, sql } from "drizzle-orm";
@@ -7,6 +8,23 @@ import { tenantMiddleware } from "./middleware/tenant";
 const app = new Hono();
 
 app.use(logger());
+
+// Split hosting: the web app (Hostinger) and this API (VPS, behind Caddy at
+// api.wacits.cyberlative.com) are different origins now, so this is a real
+// cross-origin request, not same-Docker-network traffic. CORS_ORIGIN must
+// be set to the exact frontend origin — never "*" once real credentials or
+// cookies are involved (Better Auth sessions will be, from Phase 1 on).
+const corsOrigin = process.env.CORS_ORIGIN;
+if (!corsOrigin) {
+  throw new Error("CORS_ORIGIN is not set. Refusing to start (see .env.example / TS-8).");
+}
+app.use(
+  "*",
+  cors({
+    origin: corsOrigin,
+    credentials: true,
+  }),
+);
 
 // PRD §4.1 — AR-1: every process is a separately restartable container. This
 // health check is what an external uptime monitor and Docker's own

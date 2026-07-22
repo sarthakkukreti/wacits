@@ -4,7 +4,12 @@
 // (§12 tiles: campaigns, delivery rates, quality, portfolio headroom) is
 // Phase 6 work per §25.
 
-const API_URL = process.env.API_INTERNAL_URL ?? "http://localhost:8787";
+// The web app and the API now run on separate hosts (Hostinger shared
+// hosting for this app, a VPS for the API/webhook/workers/database) — see
+// RUNBOOK.md "Split hosting". This is a real cross-origin HTTP call, not
+// same-Docker-network traffic, so it goes over the API's public HTTPS
+// endpoint behind Caddy.
+const API_URL = process.env.API_BASE_URL ?? "http://localhost:8787";
 
 async function getHealth() {
   try {

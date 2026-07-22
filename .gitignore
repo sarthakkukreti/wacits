@@ -11,3 +11,6 @@ build/
 # This project standardizes on Bun (bun.lock); Next.js's dev server can
 # auto-install a stray pnpm lockfile the first time it runs.
 pnpm-lock.yaml
+# Packaged Hostinger deployment artifact (see apps/web/scripts) — a build
+# output, never committed.
+wacits-web.zip

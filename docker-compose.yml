@@ -6,13 +6,20 @@
 # the latest patch before a real deployment (same discipline as the
 # [Verify before build] markers in docs/PRD.md).
 #
-# Production security shape: Caddy is the ONLY service that publishes a
-# port to the host (80/443). Postgres, Valkey, the API, the webhook
-# receiver, click-redirect and the web app are reachable only on the
-# internal Docker network, by service name. This is deliberate — see the
-# RUNBOOK's "Production deployment" section for why, and
-# docker-compose.dev.yml for the local-debugging override that republishes
-# these ports on a developer machine.
+# Split hosting (see RUNBOOK.md "Split hosting"): the Next.js web app is
+# NOT part of this stack — it's built standalone and deployed separately to
+# Hostinger shared hosting. This compose file runs everything else
+# (database, queue, API, webhook receiver, workers) on its own VPS, fronted
+# by Caddy at api.wacits.cyberlative.com. Caddy is the ONLY service that
+# publishes a port to the host (80/443); Postgres, Valkey, the API, the
+# webhook receiver and click-redirect are reachable only on the internal
+# Docker network or through Caddy. docker-compose.dev.yml republishes ports
+# directly for local debugging.
+#
+# Because the web app now runs on a different host entirely, the API is no
+# longer purely internal — it's reachable at
+# https://api.wacits.cyberlative.com/ through Caddy, with CORS locked to
+# the frontend's origin (see CORS_ORIGIN in .env and apps/api/src/index.ts).
 #
 # Postgres credentials come from .env (never hardcode them here — this file
 # is committed to git). Copy .env.example and set real values before
@@ -139,25 +146,11 @@ services:
       valkey:
         condition: service_healthy
 
-  web:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
-    env_file: .env
-    environment:
-      API_INTERNAL_URL: http://api:8787
-    healthcheck:
-      test: ["CMD", "bun", "-e", "fetch('http://localhost:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    depends_on:
-      - api
-
   # Reverse proxy + automatic HTTPS. This is the ONLY service exposed to the
-  # host. See ./Caddyfile for the routing rules under wacits.cyberlative.com
-  # — path-based, since only one subdomain has been provisioned so far (see
-  # RUNBOOK.md for the tradeoff this implies for click tracking, §16).
+  # host. See ./Caddyfile for the routing rules under
+  # api.wacits.cyberlative.com — path-based, since the web app has its own
+  # separate home on Hostinger and only this one backend subdomain exists
+  # (see RUNBOOK.md for the click-tracking-domain tradeoff this implies).
   caddy:
     image: caddy:2.8.4-alpine
     env_file: .env
@@ -169,7 +162,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - web
+      - api
       - webhook
       - click-redirect
 

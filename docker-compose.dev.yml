@@ -26,6 +26,3 @@ services:
   click-redirect:
     ports:
       - "8789:8789"
-  web:
-    ports:
-      - "3000:3000"

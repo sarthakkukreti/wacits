@@ -36,6 +36,10 @@ cd apps/workers && bun run dev:import &
 cd apps/workers && bun run dev:scheduler &
 ```
 
+Locally, `dev:web` still calls the API directly at `http://localhost:8787`
+(`API_BASE_URL` in `.env`). In production the two run on different hosts
+entirely — see "Split hosting" below.
+
 Or via Docker Compose, with everything published to the host for direct
 access (builds every image, pinned tags per TS-1):
 
@@ -60,62 +64,136 @@ does not expose any of those directly.
   proves a workspace session can never read another workspace's contacts,
   even when the query itself does not filter by client.
 
-## Production deployment (e.g. wacits.cyberlative.com)
+## Split hosting: Hostinger (frontend) + VPS (backend)
 
-The base `docker-compose.yml` is written for exactly this: one process per
-container (§4.1), and **Caddy is the only service that publishes a port to
-the host** (80/443). Postgres, Valkey, the API, the webhook receiver,
-click-redirect and the web app are reachable only on the internal Docker
-network. Caddy terminates TLS and routes by path under the one subdomain
-that's been provisioned (see `Caddyfile`).
+The web app and everything else run on **different hosts** — Hostinger
+shared hosting doesn't support Docker, Postgres, Valkey, Bun, or persistent
+background workers, only a single Node.js app per domain (via Passenger).
+So:
 
-**Before running this on the server:**
+- **`wacits.cyberlative.com`** → Hostinger, serving just the Next.js
+  dashboard (built standalone, uploaded as a plain Node.js app).
+- **`api.wacits.cyberlative.com`** → the VPS, running everything else
+  (Postgres, Valkey, API, webhook receiver, workers) behind Caddy.
 
-1. **DNS.** `wacits.cyberlative.com` must have an A/AAAA record pointing at
-   the server's public IP. If the DNS is managed through Cloudflare, use
-   "DNS only" (grey cloud) rather than proxied (orange cloud) — Caddy needs
-   to complete an HTTP-01 challenge on port 80 directly, which a proxying
-   CDN in front of it will break. (DNS-01 via a Cloudflare API token is the
-   alternative if the proxy has to stay on; not set up here.)
+### Backend (the VPS)
 
-2. **Check nothing else already owns ports 80/443 on that server.** If
-   another nginx/Apache/Caddy is already running other Cyberlative sites on
-   this box, Caddy will fail to bind. Either free the ports for this
-   compose stack, or don't run the `caddy` service and instead add a vhost
-   to the existing proxy that forwards to `web:3000` / `webhook:8788` /
-   `click-redirect:8789` — ask if this is the situation and the Caddyfile's
-   routing logic can be translated directly into an nginx `server` block.
+`docker-compose.yml` is written for this: one process per container
+(§4.1), and **Caddy is the only service that publishes a port to the host**
+(80/443). Postgres, Valkey, the API, the webhook receiver and
+click-redirect are reachable only on the internal Docker network or
+through Caddy, which terminates TLS and routes by path under
+`api.wacits.cyberlative.com` (see `Caddyfile`). The web app is **not** part
+of this compose file at all.
 
-3. **Real secrets.** Copy `.env.example` to `.env` **on the server** (never
+**Before running this on the VPS:**
+
+1. **DNS.** `api.wacits.cyberlative.com` needs its own A/AAAA record
+   pointing at the VPS's IP — it cannot share a DNS record with
+   `wacits.cyberlative.com`, which points at Hostinger instead. If DNS is
+   managed through Cloudflare, use "DNS only" (grey cloud) rather than
+   proxied (orange cloud) — Caddy needs to complete an HTTP-01 challenge on
+   port 80 directly, which a proxying CDN in front of it will break.
+
+2. **Check nothing else already owns ports 80/443 on the VPS.** If another
+   nginx/Apache/Caddy is already running there, this Caddy service will
+   fail to bind — either free the ports, or skip the `caddy` service and
+   add a vhost to the existing proxy forwarding to `api:8787` /
+   `webhook:8788` / `click-redirect:8789` instead (the `Caddyfile`'s routing
+   logic translates directly into an nginx `server` block if needed).
+
+3. **Real secrets.** Copy `.env.example` to `.env` **on the VPS** (never
    commit the real one) and fill in at minimum `POSTGRES_PASSWORD` (no
-   default — compose refuses to start without it) and `WACITS_DOMAIN`
-   (defaults to `wacits.cyberlative.com` in the example file already). Meta
-   credentials (`META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN`,
-   `META_SYSTEM_USER_TOKEN`) go here too once you have them.
+   default — compose refuses to start without it), `API_PUBLIC_DOMAIN`
+   (`api.wacits.cyberlative.com`), and `CORS_ORIGIN`
+   (`https://wacits.cyberlative.com` — the API rejects any other origin).
+   Meta credentials go here too once you have them.
 
 4. **Bring it up:**
 
    ```
    docker compose up -d --build
-   docker compose ps          # everything should report healthy within ~30s
+   docker compose ps             # everything should report healthy within ~30s
    docker compose logs -f caddy  # confirm the certificate was issued
    ```
 
 5. **Point Meta at it.** In the App Dashboard → WhatsApp → Configuration:
-   - Callback URL: `https://wacits.cyberlative.com/webhook`
+   - Callback URL: `https://api.wacits.cyberlative.com/webhook`
    - Verify token: whatever you put in `META_WEBHOOK_VERIFY_TOKEN`
 
-   Click-tracking links will resolve at
-   `https://wacits.cyberlative.com/c/<token>` once that feature is built.
-   Note this reuses the app's own domain rather than a dedicated one — a
-   deliberate compromise since only one subdomain exists today (PRD §16
-   would prefer a clean domain of its own for click-through reputation;
-   revisit if that becomes a real concern).
+   Click-tracking links resolve at
+   `https://api.wacits.cyberlative.com/c/<token>` once that feature is
+   built — on the backend domain rather than a dedicated one, a deliberate
+   compromise since only these two subdomains exist today (PRD §16 would
+   prefer a clean domain of its own for click-through reputation; revisit
+   if that becomes a real concern).
 
 6. **Persisting certificates.** Caddy's automatically-obtained certificate
-   lives in the `caddy_data` named volume. Don't delete that volume
-   casually — Let's Encrypt rate-limits repeated issuance for the same
-   domain.
+   lives in the `caddy_data` named volume. Don't delete it casually — Let's
+   Encrypt rate-limits repeated issuance for the same domain.
+
+### Frontend (Hostinger)
+
+Hostinger's Node.js App wizard can't detect Next.js here because this repo
+is a Bun-workspaces monorepo — Next.js isn't at the repo root. Rather than
+fight that, build the app **standalone** (self-contained server.js plus a
+trimmed node_modules, no Bun/monorepo/`npm install` needed on Hostinger's
+side at all) and upload the output directly:
+
+```
+cd apps/web
+API_BASE_URL=https://api.wacits.cyberlative.com bun run package:hostinger
+```
+
+This produces `apps/web/wacits-web.zip`. In Hostinger's hPanel:
+
+1. **Websites → Add Website → Node.js Web App.**
+2. **Framework: "Other"** (auto-detection will fail on a monorepo; this is
+   expected — pick it manually rather than trying to fix detection).
+3. **Node.js version:** 20.x, 22.x, or 24.x (Next.js 16 requires Node
+   20.9+; **not** 18.x).
+4. **Upload the zip.**
+5. **Startup / entry file:** `apps/web/server.js` — **not** `server.js`.
+   The path is nested because this app lives in a monorepo; the packaging
+   script's own output tells you the exact path every time it runs, in
+   case the structure ever changes.
+6. **Environment variables:** set `API_BASE_URL` to
+   `https://api.wacits.cyberlative.com`. Whatever port Hostinger assigns is
+   passed to the app via its own `PORT` env var automatically — the
+   packaged `server.js` already respects it.
+
+**What the packaging script (`apps/web/scripts/package-standalone.sh`)
+actually does, and why each step exists** — all three were found by
+actually running the packaged output with plain `node` (not Bun) from a
+different directory before trusting it, which is worth repeating after any
+Next.js/Bun upgrade:
+
+- **Copies `.next/static` and `public/` into the standalone app
+  directory.** Next's standalone output doesn't include these
+  automatically — documented Next.js behavior, not a bug.
+- **Promotes Bun's hoisted `node_modules/.bun/node_modules/*` packages to
+  the real top-level `node_modules/*`.** Next's file tracer preserves
+  Bun's *internal* compatibility layer but not the *top-level* one plain
+  Node.js actually walks up to find. Running the untouched build in place
+  "works" only by accident — Node's resolution escapes the incomplete
+  standalone folder and stumbles onto the real monorepo's root
+  `node_modules` sitting right above it on disk. Move the folder anywhere
+  else (a different directory, a zip, Hostinger) and that accident goes
+  away: `server.js` throws `MODULE_NOT_FOUND` for `@swc/helpers` subpaths
+  the instant it's relocated. This step recreates the structure plain
+  Node.js expects, independent of location.
+- **Strips `sharp` and `@img/*`, then verifies they're actually gone
+  before zipping.** This app never uses `next/image`, but Next's tracer
+  bundles `sharp` into the standalone output regardless of
+  `images.unoptimized` or `outputFileTracingExcludes` (both were tried;
+  neither stopped it). That matters because `sharp` ships prebuilt native
+  binaries for whatever OS/arch it was built on — built on a Mac, those
+  are darwin-arm64 and will not run on Hostinger's Linux server. The
+  script fails loudly rather than ship a build with the wrong binary
+  silently included.
+- **Zips from inside the app directory**, so `server.js` sits at the zip's
+  root — matching what a normal (non-monorepo) Next.js standalone build
+  looks like, and what Hostinger's "startup file" field expects.
 
 ## What is real vs. a placeholder here
 

@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev -p ${WEB_PORT:-3000}",
     "build": "next build",
-    "start": "next start -p ${WEB_PORT:-3000}"
+    "start": "next start -p ${WEB_PORT:-3000}",
+    "package:hostinger": "next build && bash scripts/package-standalone.sh"
   },
   "dependencies": {
     "next": "^16.2.0",
