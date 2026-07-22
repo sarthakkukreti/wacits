@@ -196,6 +196,26 @@ services:
       valkey:
         condition: service_healthy
 
+  # §4.2 (b)/(c) — interprets the raw payloads the webhook receiver stored:
+  # inbound replies into the inbox, delivery receipts onto messages. Kept a
+  # separate process from the receiver so slow interpretation can never
+  # delay Meta's 200 (AR-4).
+  worker-webhook:
+    build:
+      context: .
+      dockerfile: apps/workers/Dockerfile
+    command: ["bun", "run", "start:webhook"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-wacits}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wacits}
+      REDIS_URL: redis://valkey:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+
   # Internal path-based router only — see ./Caddyfile for the routing rules
   # (api / /webhook / /c/*). Deliberately does NOT publish 80/443 or manage
   # its own TLS: the VPS runs Coolify, which already owns a Traefik proxy on

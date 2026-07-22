@@ -20,6 +20,38 @@ import type { NextConfig } from "next";
 // module resolution and breaks the build. scripts/package-standalone.sh
 // handles the nested path; see it and RUNBOOK.md for the Hostinger startup
 // file setting this implies (apps/web/server.js, not server.js).
+//
+// Local development only: Next.js reads .env from its own directory, but
+// this monorepo keeps one .env at the repo root that every app shares (see
+// RUNBOOK). Without this, `bun run dev:web` starts with no API_BASE_URL or
+// API_SHARED_SECRET and every page renders "cannot reach the API".
+//
+// Deployed environments are unaffected: Coolify and Hostinger inject real
+// environment variables into the process, the root .env does not exist
+// there, and anything already set is never overwritten below.
+function loadRootEnv() {
+  try {
+    const { readFileSync } = require("node:fs") as typeof import("node:fs");
+    const { join } = require("node:path") as typeof import("node:path");
+    const raw = readFileSync(join(process.cwd(), "..", "..", ".env"), "utf8");
+
+    for (const line of raw.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq === -1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      // A real environment variable always wins over the file.
+      if (process.env[key] !== undefined) continue;
+      process.env[key] = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+    }
+  } catch {
+    // No root .env (a deployed container) — nothing to do.
+  }
+}
+
+loadRootEnv();
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: "standalone",

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { createHash } from "node:crypto";
 import { db, webhookEvent, withSystemAccess } from "@wacits/db";
+import { webhookQueue } from "@wacits/queue";
 import { sql } from "drizzle-orm";
 import { verifySignature } from "./verify-signature";
 
@@ -69,24 +70,43 @@ app.post("/", async (c) => {
   // AR-8/DM-9: persist raw bytes durably BEFORE returning 200. This table
   // write happens under wacits_platform (see withSystemAccess) because the
   // owning client is not yet known — resolution happens in a worker.
-  await withSystemAccess(async (tx) => {
-    await tx.insert(webhookEvent).values({
-      signatureVerified: "true",
-      objectType: parsed?.object ?? null,
-      wabaId: entry?.id ?? null,
-      field: change?.field ?? null,
-      rawBody,
-      bodyHash,
-      processingState: "pending",
-    });
-  });
+  const [stored] = await withSystemAccess(async (tx) =>
+    tx
+      .insert(webhookEvent)
+      .values({
+        signatureVerified: "true",
+        objectType: parsed?.object ?? null,
+        wabaId: entry?.id ?? null,
+        field: change?.field ?? null,
+        rawBody,
+        bodyHash,
+        processingState: "pending",
+      })
+      .returning({ id: webhookEvent.id }),
+  );
 
-  // TODO (Phase 1, §13/§14): enqueue for asynchronous processing instead of
-  // handling inline. See apps/workers for the send/import/scheduler
-  // workers this project already scaffolds; inbound-webhook processing
-  // (§4.2 walkthroughs (b) and (c)) needs its own queue consumer alongside
-  // them, matching AR-9/AR-10/AR-11 (idempotent, timestamp-ordered,
-  // deduped on (wamid, status)).
+  // §4.2 (b)/(c) — hand interpretation to the webhook worker. Enqueue
+  // failures must never turn into a non-200: the raw event is already
+  // durable, so a lost job is recoverable by re-enqueuing, whereas a failed
+  // ack makes Meta retry and eventually disable the subscription.
+  try {
+    await webhookQueue.add(
+      "webhook",
+      { webhookEventId: stored.id },
+      {
+        // BullMQ rejects a custom job id containing ':' unless it has
+        // exactly three colon-separated parts, so use the bare event UUID —
+        // it is already unique and makes the enqueue idempotent.
+        jobId: stored.id,
+        attempts: 5,
+        backoff: { type: "exponential", delay: 2_000 },
+        removeOnComplete: 1000,
+        removeOnFail: 5000,
+      },
+    );
+  } catch (err) {
+    console.error("[webhook] failed to enqueue for processing (event is stored and replayable):", err);
+  }
 
   // AR-4: acknowledge fast. Everything above this line is signature
   // verification and durable persistence only — no interpretation.

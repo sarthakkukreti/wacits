@@ -7,9 +7,11 @@
     "dev:send": "bun run --watch src/send-worker.ts",
     "dev:import": "bun run --watch src/import-worker.ts",
     "dev:scheduler": "bun run --watch src/scheduler-worker.ts",
+    "dev:webhook": "bun run --watch src/webhook-worker.ts",
     "start:send": "bun run src/send-worker.ts",
     "start:import": "bun run src/import-worker.ts",
-    "start:scheduler": "bun run src/scheduler-worker.ts"
+    "start:scheduler": "bun run src/scheduler-worker.ts",
+    "start:webhook": "bun run src/webhook-worker.ts"
   },
   "dependencies": {
     "@wacits/db": "workspace:*",

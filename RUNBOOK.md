@@ -34,7 +34,14 @@ bun run dev:web             # :3000 — open this one in a browser
 cd apps/workers && bun run dev:send &
 cd apps/workers && bun run dev:import &
 cd apps/workers && bun run dev:scheduler &
+cd apps/workers && bun run dev:webhook &   # turns raw webhooks into inbox messages
 ```
+
+The web app reads the repo-root `.env` (see `apps/web/next.config.ts`), so
+the same file configures every process locally. Two values must be set
+before anything works: `API_SHARED_SECRET` (the credential the web app
+presents to the API — generate with `openssl rand -hex 32`) and
+`TOKEN_ENCRYPTION_KEY` (`openssl rand -base64 32`).
 
 Locally, `dev:web` still calls the API directly at `http://localhost:8787`
 (`API_BASE_URL` in `.env`). In production the two run on different hosts
@@ -238,16 +245,51 @@ Next.js/Bun upgrade:
 
 ## What is real vs. a placeholder here
 
-**Real:** the full data model (`packages/db/src/schema`, all of PRD §21),
-row-level security enforced in the database (not just application code),
-the append-only/mutable table split, the Appendix A error-code seed, the
-settings-as-data pattern, the BullMQ queue wiring with its two mandatory
-config rules, and the webhook receiver's signature verification.
+**Real and exercised end to end** (verified locally against Postgres, Valkey
+and Meta's live API):
 
-**Placeholder (see the `TODO` comments for the exact PRD reference):**
-actual Meta API calls (no WABA is onboarded yet — see Appendix B), the
-contact-import file parser, inbound-webhook business processing, click-link
-token resolution (flagged as a genuine data-model gap to resolve, not
-guessed at), and all authentication (Better Auth is specified but not
-wired — the API currently trusts an `x-client-id` header, which is fine for
-this scaffold and must not reach anything resembling production).
+- The full data model (`packages/db/src/schema`, all of PRD §21) with
+  row-level security enforced in the database, not just application code.
+- **Contacts** — create/edit/archive, search and filter, E.164
+  normalisation via libphonenumber-js, tags, contact types.
+- **CSV import** (§9) — preview → column mapping → commit, with automatic
+  header detection, per-row error reporting, in-file duplicate handling,
+  fill-blanks-only updates, optional group creation, and the DM-28 24-hour
+  undo that removes only what the import created.
+- **Campaigns** (§12) — audience resolution from groups/tags/everyone with a
+  live count, suppression applied and *counted* at snapshot time, outbox
+  expansion, launch/pause/cancel, and a per-recipient delivery monitor.
+- **Sending** (§13) — real Meta Cloud API calls. Errors are classified from
+  `error_code_classification` by (api_surface, code) per DM-27, never a
+  hardcoded switch: RETRY_BACKOFF retries, OPERATIONAL_ALERT pauses the
+  campaign, 131050 writes to the global suppression list, 131026 accumulates
+  strikes toward `suspect` per DM-22.
+- **Inbox** (§14) — conversation list, threaded chat, one-to-one replies,
+  starting a chat from a bare phone number, and the 24-hour customer service
+  window enforced in both the API and the composer.
+- **Inbound webhooks** — signature verification, durable raw capture, then
+  asynchronous processing into conversations/messages/service windows, with
+  delivery receipts applied by monotonic status rank (DM-7) and deduped on
+  (wamid, status) (DM-11). Inbound opt-out keywords ("STOP") suppress
+  immediately.
+- **Templates** (§11) — synced from Meta with their live approval status;
+  only APPROVED templates are offered to the campaign builder.
+- Access tokens encrypted at rest (AES-256-GCM) and redacted from any error
+  text before it is shown or logged.
+
+**Still placeholder or absent:**
+
+- **Per-user authentication.** Better Auth is specified (§6) but not wired.
+  The API is protected by a single shared secret (`API_SHARED_SECRET`) that
+  only the Next.js server holds, and every dashboard action is attributed to
+  one seeded operator account. This is a real access control, but it is not
+  per-user auth and gives no role separation — §6's four workspace roles are
+  modelled in the schema and not yet enforced.
+- Click-link token resolution (a genuine data-model gap, deliberately not
+  guessed at), scheduled campaigns, MM Lite, media messages in the composer,
+  quiet hours, and the frequency governor.
+- **There is no WhatsApp number validation and there never will be.** Meta's
+  only contact-check endpoint (On-Premises `/contacts`) reached end-of-life
+  on 2025-10-23 with no Cloud API replacement. Import validates *format*
+  only; a number is proven reachable solely by a delivery receipt or an
+  inbound reply, which is what the `deliverability_state` column records.

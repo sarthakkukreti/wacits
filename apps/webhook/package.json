@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@wacits/db": "workspace:*",
+    "@wacits/queue": "workspace:*",
     "drizzle-orm": ">=0.45.2",
     "hono": "^4.12.0"
   },
