@@ -10,6 +10,17 @@
 # verified against. Use this file only when you specifically want to
 # exercise the Docker images themselves. Never use this file on the
 # production server — it republishes Postgres and Valkey to the host.
+#
+# The base docker-compose.yml declares the `coolify` network as `external:
+# true` (it must already exist on the VPS, created by Coolify itself) — a
+# dev machine won't have that network, so this override flips it back to a
+# plain Compose-managed network for local runs. The `caddy` service's own
+# `networks: [default, coolify]` list still applies unchanged (Compose
+# merges service network lists across files); only which network named
+# `coolify` gets attached changes.
+networks:
+  coolify:
+    external: false
 services:
   postgres:
     ports:

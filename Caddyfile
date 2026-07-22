@@ -1,34 +1,34 @@
-# Reverse proxy for the CITS WhatsApp Communication Manager backend.
+# Internal path-based router for the CITS WhatsApp Communication Manager
+# backend — NOT the public TLS edge. The VPS is managed by Coolify, which
+# already runs its own Traefik proxy owning ports 80/443 and terminating
+# HTTPS for every app on the box (see RUNBOOK.md "Split hosting"). Coolify
+# is told to route api.wacits.cyberlative.com to this container's port 80;
+# it forwards plain HTTP here, which is why this listens on a bare `:80`
+# rather than a domain name — a domain-name site address is what tells
+# Caddy to attempt its own Let's Encrypt certificate via ACME, which would
+# be redundant with (and would fight) Coolify's own certificate for the
+# same domain. Don't reintroduce a domain-name site block here without
+# also removing this from behind Coolify's proxy.
 #
-# Split hosting (see RUNBOOK.md "Split hosting"): the Next.js web app is
-# deployed separately on Hostinger shared hosting and is NOT behind this
-# proxy. This Caddyfile only fronts the backend — API, webhook receiver,
-# click-redirect — on its own subdomain.
-#
-# API_PUBLIC_DOMAIN comes from .env (Caddy reads {$VAR} from its own
-# process environment — see the caddy service's env_file in
-# docker-compose.yml). Caddy obtains and renews a Let's Encrypt certificate
-# for this domain automatically via the HTTP-01 challenge on port 80, so
-# port 80 must actually reach this container from the public internet — if
-# the DNS record is proxied through Cloudflare (the orange cloud), either
-# switch it to "DNS only" (grey cloud) or configure Caddy's Cloudflare
-# DNS-01 plugin instead. Plain "DNS only" is the simpler starting point.
+# Split hosting: the Next.js web app is deployed separately on Hostinger
+# shared hosting and is NOT behind this proxy. This Caddyfile only fronts
+# the backend — API, webhook receiver, click-redirect.
 #
 # Click-tracking links (/c/*) live on this same backend domain rather than
 # a dedicated domain of their own — a deliberate compromise since only this
 # one backend subdomain exists today (PRD §16 would prefer a clean domain
 # for click-through reputation; revisit if that becomes a real concern).
 
-{$API_PUBLIC_DOMAIN} {
-	# Meta's webhook callback URL is https://{$API_PUBLIC_DOMAIN}/webhook
+:80 {
+	# Meta's webhook callback URL is https://api.wacits.cyberlative.com/webhook
 	# — strip the /webhook prefix before forwarding, since the webhook
 	# receiver itself listens on "/" (see apps/webhook/src/index.ts).
 	handle_path /webhook* {
 		reverse_proxy webhook:8788
 	}
 
-	# Click-tracking redirects: https://{$API_PUBLIC_DOMAIN}/c/<token> —
-	# do NOT strip the prefix here, the click-redirect app's own route is
+	# Click-tracking redirects: https://api.wacits.cyberlative.com/c/<token>
+	# — do NOT strip the prefix here, the click-redirect app's own route is
 	# "/c/:token" (see apps/click-redirect/src/index.ts).
 	handle /c/* {
 		reverse_proxy click-redirect:8789

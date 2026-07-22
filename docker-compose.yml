@@ -9,12 +9,15 @@
 # Split hosting (see RUNBOOK.md "Split hosting"): the Next.js web app is
 # NOT part of this stack — it's built standalone and deployed separately to
 # Hostinger shared hosting. This compose file runs everything else
-# (database, queue, API, webhook receiver, workers) on its own VPS, fronted
-# by Caddy at api.wacits.cyberlative.com. Caddy is the ONLY service that
-# publishes a port to the host (80/443); Postgres, Valkey, the API, the
-# webhook receiver and click-redirect are reachable only on the internal
-# Docker network or through Caddy. docker-compose.dev.yml republishes ports
-# directly for local debugging.
+# (database, queue, API, webhook receiver, workers) on the VPS, which is
+# managed by Coolify. Coolify owns its own Traefik proxy on 80/443 for
+# every app on the box, so NOTHING here publishes a host port — Postgres,
+# Valkey, the API, the webhook receiver and click-redirect are reachable
+# only on the internal Docker network or through the internal `caddy`
+# router, which Coolify's Traefik is pointed at via the Traefik labels on
+# the `caddy` service below (not a Coolify UI domain assignment — see the
+# note above and RUNBOOK.md for why). docker-compose.dev.yml republishes
+# ports directly for local debugging outside of Coolify.
 #
 # Because the web app now runs on a different host entirely, the API is no
 # longer purely internal — it's reachable at
@@ -24,6 +27,21 @@
 # Postgres credentials come from .env (never hardcode them here — this file
 # is committed to git). Copy .env.example and set real values before
 # running this in anything but a throwaway environment.
+#
+# Traefik routing (`caddy` service labels below): Coolify's per-service
+# "Domain" UI field was tried first and rejected — for this Docker Compose
+# resource type/Coolify version, assigning a domain there makes Coolify
+# auto-inject `ports: 80:80 / 443:443` onto the service, which collides with
+# Coolify's own Traefik already bound to those host ports (confirmed via
+# `docker inspect` and the materialized compose file in
+# /data/coolify/applications/<uuid>/docker-compose.yaml on the VPS). The fix,
+# reverse-engineered from another working Cyberlative project on the same
+# VPS (irfcrmsi) via `docker inspect <container> --format '{{json
+# .Config.Labels}}'`, is to skip Coolify's domain field entirely and instead
+# hand-write the Traefik labels + join the shared external `coolify` network
+# directly — Traefik then discovers and routes to the container over that
+# network with no host port publishing at all. Leave "Domains for caddy"
+# EMPTY in Coolify's UI when using this.
 
 services:
   postgres:
@@ -146,20 +164,35 @@ services:
       valkey:
         condition: service_healthy
 
-  # Reverse proxy + automatic HTTPS. This is the ONLY service exposed to the
-  # host. See ./Caddyfile for the routing rules under
-  # api.wacits.cyberlative.com — path-based, since the web app has its own
-  # separate home on Hostinger and only this one backend subdomain exists
-  # (see RUNBOOK.md for the click-tracking-domain tradeoff this implies).
+  # Internal path-based router only — see ./Caddyfile for the routing rules
+  # (api / /webhook / /c/*). Deliberately does NOT publish 80/443 or manage
+  # its own TLS: the VPS runs Coolify, which already owns a Traefik proxy on
+  # those ports for every app on the box. Running our own Caddy on 80/443
+  # too would simply fail to bind. Instead this service joins Coolify's own
+  # `coolify` Docker network and carries hand-written Traefik labels (see
+  # the note above services:) so Traefik discovers it directly and forwards
+  # HTTP for api.wacits.cyberlative.com here, terminating TLS at its own
+  # edge. Router/service names are prefixed `wacits-` to stay unique across
+  # every other app Traefik already routes on this box.
   caddy:
     image: caddy:2.8.4-alpine
     env_file: .env
-    ports:
-      - "80:80"
-      - "443:443"
+    networks:
+      - default
+      - coolify
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - traefik.http.routers.wacits-http.rule=Host(`api.wacits.cyberlative.com`)
+      - traefik.http.routers.wacits-http.entrypoints=http
+      - traefik.http.routers.wacits-http.middlewares=redirect-to-https@file
+      - traefik.http.routers.wacits-https.rule=Host(`api.wacits.cyberlative.com`)
+      - traefik.http.routers.wacits-https.entrypoints=https
+      - traefik.http.routers.wacits-https.tls=true
+      - traefik.http.routers.wacits-https.tls.certresolver=letsencrypt
+      - traefik.http.services.wacits.loadbalancer.server.port=80
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
       - caddy_config:/config
     depends_on:
       - api
@@ -169,5 +202,9 @@ services:
 volumes:
   postgres_data:
   valkey_data:
-  caddy_data:
   caddy_config:
+
+networks:
+  default:
+  coolify:
+    external: true

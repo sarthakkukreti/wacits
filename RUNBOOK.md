@@ -76,50 +76,70 @@ So:
 - **`api.wacits.cyberlative.com`** → the VPS, running everything else
   (Postgres, Valkey, API, webhook receiver, workers) behind Caddy.
 
-### Backend (the VPS)
+### Backend (the VPS, managed by Coolify)
 
-`docker-compose.yml` is written for this: one process per container
-(§4.1), and **Caddy is the only service that publishes a port to the host**
-(80/443). Postgres, Valkey, the API, the webhook receiver and
-click-redirect are reachable only on the internal Docker network or
-through Caddy, which terminates TLS and routes by path under
-`api.wacits.cyberlative.com` (see `Caddyfile`). The web app is **not** part
-of this compose file at all.
+Coolify already runs its own Traefik proxy owning ports 80/443 for every
+app on the box — this stack does **not** try to compete with that.
+`docker-compose.yml`'s `caddy` service is an *internal* path-based router
+(see `Caddyfile`) that listens on a plain `:80` inside the Docker network
+and holds no certificate of its own. Coolify's Traefik is the actual
+public HTTPS edge; it terminates TLS for `api.wacits.cyberlative.com` and
+forwards plain HTTP to this `caddy` service, which then routes `/webhook`
+→ the webhook receiver, `/c/*` → click-redirect, and everything else → the
+API. The web app is **not** part of this compose file at all — it's on
+Hostinger (see below).
 
-**Before running this on the VPS:**
+**Important — do NOT use Coolify's per-service "Domain" field for this.**
+It was tried first and rejected: for this Docker Compose resource type (at
+least on this Coolify version), assigning a domain there makes Coolify
+auto-inject `ports: - '80:80'` / `- '443:443'` onto the service — which
+collides with Coolify's own Traefik already bound to those host ports
+(`Bind for 0.0.0.0:80 failed: port is already allocated`). Confirmed by
+inspecting the materialized compose file Coolify actually runs, at
+`/data/coolify/applications/<uuid>/docker-compose.yaml` on the VPS via
+Coolify's Terminal. The working pattern instead — reverse-engineered from
+another Cyberlative project already running successfully on this same
+VPS/Coolify instance, via `docker inspect <container> --format
+'{{json .Config.Labels}}'` — is to hand-write Traefik labels directly onto
+the `caddy` service in `docker-compose.yml` and join Coolify's shared
+external `coolify` Docker network. Traefik then discovers the container
+over that network by its labels; there is no host port publishing
+involved at all. This is already done in `docker-compose.yml` — nothing
+further to add there.
+
+**Deploying it in Coolify:**
 
 1. **DNS.** `api.wacits.cyberlative.com` needs its own A/AAAA record
-   pointing at the VPS's IP — it cannot share a DNS record with
-   `wacits.cyberlative.com`, which points at Hostinger instead. If DNS is
-   managed through Cloudflare, use "DNS only" (grey cloud) rather than
-   proxied (orange cloud) — Caddy needs to complete an HTTP-01 challenge on
-   port 80 directly, which a proxying CDN in front of it will break.
+   pointing at the VPS's IP — it cannot share a record with
+   `wacits.cyberlative.com`, which points at Hostinger instead.
 
-2. **Check nothing else already owns ports 80/443 on the VPS.** If another
-   nginx/Apache/Caddy is already running there, this Caddy service will
-   fail to bind — either free the ports, or skip the `caddy` service and
-   add a vhost to the existing proxy forwarding to `api:8787` /
-   `webhook:8788` / `click-redirect:8789` instead (the `Caddyfile`'s routing
-   logic translates directly into an nginx `server` block if needed).
+2. **New resource → Docker Compose**, pointed at this repo (Coolify can
+   deploy directly from the GitHub repo and compose file — no need to hand
+   it a raw compose paste). Coolify parses the services in
+   `docker-compose.yml`. Enable **"Preserve Repository During
+   Deployment"** in Configuration → General — without it, files referenced
+   by bind mounts (like `./Caddyfile`) won't exist in Coolify's deployment
+   directory and the `caddy` container will fail to start.
 
-3. **Real secrets.** Copy `.env.example` to `.env` **on the VPS** (never
-   commit the real one) and fill in at minimum `POSTGRES_PASSWORD` (no
-   default — compose refuses to start without it), `API_PUBLIC_DOMAIN`
-   (`api.wacits.cyberlative.com`), and `CORS_ORIGIN`
-   (`https://wacits.cyberlative.com` — the API rejects any other origin).
-   Meta credentials go here too once you have them.
+3. **Leave "Domains for caddy" (and every other service) EMPTY** in
+   Coolify's UI. Routing is fully described by the Traefik labels already
+   in `docker-compose.yml` — assigning a domain via Coolify's own field is
+   what causes the port conflict described above.
 
-4. **Bring it up:**
+4. **Environment variables**, set in Coolify's UI for this resource (this
+   is effectively what `.env` holds locally): `POSTGRES_PASSWORD` (no
+   default — the stack refuses to start without it), `CORS_ORIGIN`
+   (`https://wacits.cyberlative.com` — the API rejects any other origin),
+   plus Meta credentials once you have them. `API_PUBLIC_DOMAIN` is purely
+   informational (see `.env.example`) — nothing reads it at runtime; the
+   real hostname lives in the Traefik labels in `docker-compose.yml`.
 
-   ```
-   docker compose up -d --build
-   docker compose ps             # everything should report healthy within ~30s
-   docker compose logs -f caddy  # confirm the certificate was issued
-   ```
+5. **Deploy**, then confirm all services report healthy in Coolify's UI,
+   and check the `caddy` service's logs for routing errors.
 
-5. **Point Meta at it.** In the App Dashboard → WhatsApp → Configuration:
+6. **Point Meta at it.** In the App Dashboard → WhatsApp → Configuration:
    - Callback URL: `https://api.wacits.cyberlative.com/webhook`
-   - Verify token: whatever you put in `META_WEBHOOK_VERIFY_TOKEN`
+   - Verify token: whatever you set for `META_WEBHOOK_VERIFY_TOKEN`
 
    Click-tracking links resolve at
    `https://api.wacits.cyberlative.com/c/<token>` once that feature is
@@ -128,17 +148,38 @@ of this compose file at all.
    prefer a clean domain of its own for click-through reputation; revisit
    if that becomes a real concern).
 
-6. **Persisting certificates.** Caddy's automatically-obtained certificate
-   lives in the `caddy_data` named volume. Don't delete it casually — Let's
-   Encrypt rate-limits repeated issuance for the same domain.
+**If this ever needs to run WITHOUT Coolify** (a plain VPS with nothing
+else on it), the `caddy` service and `Caddyfile` would need to go back to
+owning 80/443 directly and requesting its own certificate — that's the
+shape this was originally built in; reverting the `expose`/`ports` and the
+Caddyfile's `:80` back to a real domain-name site block is the whole
+change. Not needed here since Coolify already exists on this VPS.
 
 ### Frontend (Hostinger)
 
-Hostinger's Node.js App wizard can't detect Next.js here because this repo
-is a Bun-workspaces monorepo — Next.js isn't at the repo root. Rather than
-fight that, build the app **standalone** (self-contained server.js plus a
-trimmed node_modules, no Bun/monorepo/`npm install` needed on Hostinger's
-side at all) and upload the output directly:
+Hostinger's Node.js App wizard supports two ways in: connecting a GitHub
+repo directly (auto-builds on every push), or uploading a `.zip`. The
+GitHub route is more convenient day-to-day, but it means Hostinger runs its
+**own** `npm install && npm run build` against whatever it finds — and
+there's no confirmation that its GitHub-connect flow supports pointing at
+a subdirectory of a monorepo rather than the repo root. Given the repo
+root has no `next` dependency and no `next.config`, that path very likely
+hits the exact same auto-detection failure as the wizard already did.
+
+The zip-upload path below is the one **actually verified end-to-end** in
+this project — built standalone, extracted fresh, and run with plain
+`node` in a directory that had never seen this repo before trusting it.
+Use it now; if you want to move to GitHub auto-deploy later, ask Hostinger
+support whether their Node.js GitHub integration supports a subdirectory
+root — if it does, point it at `apps/web` and let Hostinger run `npm run
+build` / `npm start` there directly (no Bun involved, so the standalone
+packaging quirks below wouldn't apply at all). Don't switch to it without
+re-verifying the same way: extract what it actually deploys and hit the
+running app.
+
+Build the app **standalone** (self-contained server.js plus a trimmed
+node_modules, no Bun/monorepo/`npm install` needed on Hostinger's side at
+all) and upload the output directly:
 
 ```
 cd apps/web
