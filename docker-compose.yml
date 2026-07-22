@@ -112,6 +112,9 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-wacits}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wacits}
+      # Required since the receiver hands every verified event to the
+      # webhook worker over the queue (AR-4) — without it, it will not start.
+      REDIS_URL: redis://valkey:6379
     # See the `api` service above for why this alias exists.
     networks:
       default:
@@ -124,6 +127,8 @@ services:
       retries: 5
     depends_on:
       postgres:
+        condition: service_healthy
+      valkey:
         condition: service_healthy
 
   click-redirect:
