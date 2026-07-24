@@ -116,7 +116,8 @@ fi
 # Hostinger's Linux; with next declared as a real dependency, npm reinstalls
 # sharp for whatever platform the host actually is.
 node - "$REL_APP_DIR" > ".next/standalone/package.json" <<'NODE'
-const { readFileSync, existsSync } = require("node:fs");
+const { readFileSync, existsSync, readdirSync } = require("node:fs");
+const { join } = require("node:path");
 // Reading the script from stdin puts "-" in argv[1], so the first real
 // argument lands at argv[2].
 const relAppDir = process.argv[2];
@@ -125,12 +126,39 @@ if (!relAppDir || relAppDir === "-") {
   process.exit(1);
 }
 
+// Locate the traced node_modules rather than assuming it sits directly under
+// .next/standalone. Next mirrors the workspace root's path *from the
+// filesystem root* inside the standalone output, so its depth depends entirely
+// on where the checkout happens to live. Locally that yields
+// .next/standalone/node_modules; on Hostinger, which builds in
+// /builds/source/repository, it yields
+// .next/standalone/builds/source/repository/node_modules — and hardcoding the
+// former made this step fail there with "could not resolve the built Next.js
+// version". Walk down and find it instead.
+function findNodeModules(dir, depth = 0) {
+  if (depth > 8) return null;
+  const candidate = join(dir, "node_modules", "next", "package.json");
+  if (existsSync(candidate)) return join(dir, "node_modules");
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name === "node_modules") continue;
+    const found = findNodeModules(join(dir, entry.name), depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+const nodeModules = findNodeModules(".next/standalone");
+if (!nodeModules) {
+  console.error("error: could not find the traced node_modules containing next/ under .next/standalone.");
+  process.exit(1);
+}
+
 // Direct dependencies come from the app's own manifest; their exact resolved
 // versions come from the build output. Transitive deps are left for npm.
 const appManifest = JSON.parse(readFileSync("package.json", "utf8"));
 const dependencies = {};
 for (const name of Object.keys(appManifest.dependencies ?? {})) {
-  const manifestPath = `.next/standalone/node_modules/${name}/package.json`;
+  const manifestPath = join(nodeModules, name, "package.json");
   if (!existsSync(manifestPath)) continue; // build-time-only shim, e.g. server-only
   dependencies[name] = JSON.parse(readFileSync(manifestPath, "utf8")).version;
 }
