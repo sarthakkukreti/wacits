@@ -165,35 +165,59 @@ change. Not needed here since Coolify already exists on this VPS.
 ### Frontend (Hostinger)
 
 Hostinger's Node.js App wizard supports two ways in: connecting a GitHub
-repo directly (auto-builds on every push), or uploading a `.zip`. The
-GitHub route is more convenient day-to-day, but it means Hostinger runs its
-**own** `npm install && npm run build` against whatever it finds — and
-there's no confirmation that its GitHub-connect flow supports pointing at
-a subdirectory of a monorepo rather than the repo root. Given the repo
-root has no `next` dependency and no `next.config`, that path very likely
-hits the exact same auto-detection failure as the wizard already did.
-
-The zip-upload path below is the one **actually verified end-to-end** in
-this project — built standalone, extracted fresh, and run with plain
-`node` in a directory that had never seen this repo before trusting it.
-Use it now; if you want to move to GitHub auto-deploy later, ask Hostinger
-support whether their Node.js GitHub integration supports a subdirectory
-root — if it does, point it at `apps/web` and let Hostinger run `npm run
-build` / `npm start` there directly (no Bun involved, so the standalone
-packaging quirks below wouldn't apply at all). Don't switch to it without
-re-verifying the same way: extract what it actually deploys and hit the
-running app.
-
-Build the app **standalone** (self-contained server.js plus a trimmed
-node_modules, no Bun/monorepo/`npm install` needed on Hostinger's side at
-all) and upload the output directly:
+repo directly, or uploading a `.zip`. **Use the GitHub route, pointed at
+the generated `hostinger-deploy` branch:**
 
 ```
 cd apps/web
-API_BASE_URL=https://api.wacits.cyberlative.com bun run package:hostinger
+bun run deploy:hostinger
 ```
 
-This produces `apps/web/wacits-web.zip`. In Hostinger's hPanel:
+That builds the app, prepares the standalone output, and force-pushes it
+to `origin/hostinger-deploy` — a generated orphan branch holding build
+output only. Point Hostinger at that branch, startup file `server.js`,
+and it deploys on push. Never merge that branch into `main`, never branch
+off it, and never edit it by hand; change the source on `main` and re-run.
+
+**Do not point Hostinger at `main`.** Hostinger clones the repo and runs
+`npm install` in the application root unconditionally. Against `main`
+that reads the monorepo root `package.json`, follows `"workspaces":
+["apps/*", "packages/*"]` into `apps/api` and `packages/db`, and dies on
+Bun's workspace protocol, which npm does not implement:
+
+```
+npm error code EUNSUPPORTEDPROTOCOL
+npm error Unsupported URL Type "workspace:": workspace:*
+ERROR: Failed to install dependencies
+```
+
+There is no Hostinger setting that skips that install step, and rewriting
+the backend packages to npm-compatible specifiers would change dependency
+resolution for the working Docker/Bun deployment on the VPS purely to
+satisfy the frontend host. The deploy branch sidesteps it: its root
+`package.json` declares only plain-registry packages, so npm never reaches
+a `workspace:` reference.
+
+**That root `package.json` must keep its dependencies.** An empty one was
+tried first and is actively destructive — npm treats every vendored
+package as extraneous and prunes it (`removed 9 packages`), leaving
+`node_modules` with only `@next/` and `@swc/`: no `next`, no `react`, no
+`react-dom`, and an app that cannot boot. Declaring them keeps the tree
+intact and lets npm reinstall anything the tracer left incomplete. They
+are pinned to the exact versions the build resolved, read back out of the
+built tree rather than copied from `apps/web/package.json` (those are
+ranges like `^16.2.0`, and a range lets the host install a different
+Next.js than the one that produced `.next/`). Letting npm install run also
+fixes `sharp` properly — see below.
+
+A `.zip` is still available via `bun run package:hostinger` for hosts
+without a git integration; it produces `apps/web/wacits-web.zip` from the
+same prepared output. Either way, **verify the same way before trusting
+it**: extract what actually gets deployed into a directory that has never
+seen this repo, run `npm install && npm run build && npm start` with plain
+`node` (not Bun), and hit the running app.
+
+For the zip path, in Hostinger's hPanel:
 
 1. **Websites → Add Website → Node.js Web App.**
 2. **Framework: "Other"** (auto-detection will fail on a monorepo; this is
@@ -201,14 +225,20 @@ This produces `apps/web/wacits-web.zip`. In Hostinger's hPanel:
 3. **Node.js version:** 20.x, 22.x, or 24.x (Next.js 16 requires Node
    20.9+; **not** 18.x).
 4. **Upload the zip.**
-5. **Startup / entry file:** `apps/web/server.js` — **not** `server.js`.
-   The path is nested because this app lives in a monorepo; the packaging
-   script's own output tells you the exact path every time it runs, in
-   case the structure ever changes.
-6. **Environment variables:** set `API_BASE_URL` to
-   `https://api.wacits.cyberlative.com`. Whatever port Hostinger assigns is
-   passed to the app via its own `PORT` env var automatically — the
-   packaged `server.js` already respects it.
+5. **Startup / entry file:** `server.js`. The real server is nested at
+   `apps/web/server.js` because this app lives in a monorepo, but the
+   packaging step also writes a one-line root shim that requires it, so
+   the plain root path works and either value is correct. (The nested
+   server does its own `process.chdir(__dirname)`, so requiring it from
+   the root is safe.) The script prints the exact paths every time it
+   runs, in case the structure ever changes.
+6. **Environment variables:** `API_BASE_URL`
+   (`https://api.wacits.cyberlative.com`), `API_SHARED_SECRET` (must match
+   the API's own value — the dashboard renders server-side and
+   authenticates with it, so every page fails to render without it), and
+   `WORKSPACE_SLUG` (`cits-internal`). Whatever port Hostinger assigns is
+   passed via its own `PORT` env var automatically — the packaged
+   `server.js` already respects it.
 
 **What the packaging script (`apps/web/scripts/package-standalone.sh`)
 actually does, and why each step exists** — all three were found by
