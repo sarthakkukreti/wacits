@@ -11,6 +11,7 @@
     "//": "build/start exist for Hostinger, which deploys the dashboard from this repo root and runs `npm run build` then `npm start` there. Everything else on this repo runs under Bun; these two are the only npm entry points. `next start` is NOT used because next.config.ts sets output: standalone, which it explicitly refuses to serve ('next start does not work with output: standalone configuration') — prepare-standalone.sh assembles that output and writes the root server.js shim started below.",
     "build": "cd apps/web && npm run build && bash scripts/prepare-standalone.sh",
     "start": "node apps/web/.next/standalone/server.js",
+    "postinstall": "node scripts/hostinger-postinstall.mjs",
     "db:generate": "cd packages/db && bun run db:generate",
     "db:migrate": "cd packages/db && bun run db:migrate",
     "db:security-setup": "cd packages/db && bun run db:security-setup",
