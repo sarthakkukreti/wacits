@@ -191,6 +191,39 @@ cat > ".next/standalone/server.js" <<EOF
 // Entry point for hosts that expect a root-level startup file (Hostinger /
 // Passenger). The real server lives in the nested standalone output; it
 // chdir()s to its own directory on startup, so requiring it from here is safe.
+
+// Hostinger writes the environment variables set in its panel to
+// <docroot>/.builds/config/.env and does NOT inject them into the process --
+// nothing on the box reads that file. Without this the app starts with no
+// API_BASE_URL, API_SHARED_SECRET or WORKSPACE_SLUG and every page fails to
+// render, which is indistinguishable from a broken build. Walk up from here to
+// find it; on any other host it simply is not there and this is a no-op. Real
+// environment variables always win, so this never overrides a host that does
+// inject them properly.
+(() => {
+  const { readFileSync, existsSync } = require("node:fs");
+  const { join, dirname } = require("node:path");
+  let dir = __dirname;
+  for (let i = 0; i < 8; i++) {
+    const candidate = join(dir, ".builds", "config", ".env");
+    if (existsSync(candidate)) {
+      for (const line of readFileSync(candidate, "utf8").split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eq = trimmed.indexOf("=");
+        if (eq === -1) continue;
+        const key = trimmed.slice(0, eq).trim();
+        if (process.env[key] !== undefined) continue;
+        process.env[key] = trimmed.slice(eq + 1).trim().replace(/^["']|["']\$/g, "");
+      }
+      break;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+})();
+
 require("./$REL_APP_DIR/server.js");
 EOF
 
