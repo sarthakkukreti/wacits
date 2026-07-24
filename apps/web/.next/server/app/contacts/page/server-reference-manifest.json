@@ -1,0 +1,17 @@
+{
+  "node": {
+    "60938d553a7ef9a8f252892819dbac79c63734f266": {
+      "workers": {
+        "app/contacts/page": {
+          "moduleId": 52726,
+          "async": false,
+          "exportedName": "createContactAction",
+          "filename": "apps/web/app/contacts/actions.ts"
+        }
+      },
+      "exportedName": "createContactAction",
+      "filename": "apps/web/app/contacts/actions.ts"
+    }
+  },
+  "edge": {}
+}

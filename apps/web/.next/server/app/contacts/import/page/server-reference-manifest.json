@@ -1,0 +1,29 @@
+{
+  "node": {
+    "604d4164c464501543a0e2ab7bf65d82a483fff1bc": {
+      "workers": {
+        "app/contacts/import/page": {
+          "moduleId": 23076,
+          "async": false,
+          "exportedName": "commitImportAction",
+          "filename": "apps/web/app/contacts/actions.ts"
+        }
+      },
+      "exportedName": "commitImportAction",
+      "filename": "apps/web/app/contacts/actions.ts"
+    },
+    "60d9eb80821dc3bbc94134b44da27e3d37c74b6717": {
+      "workers": {
+        "app/contacts/import/page": {
+          "moduleId": 23076,
+          "async": false,
+          "exportedName": "previewImportAction",
+          "filename": "apps/web/app/contacts/actions.ts"
+        }
+      },
+      "exportedName": "previewImportAction",
+      "filename": "apps/web/app/contacts/actions.ts"
+    }
+  },
+  "edge": {}
+}

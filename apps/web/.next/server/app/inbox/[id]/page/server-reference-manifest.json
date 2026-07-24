@@ -1,0 +1,41 @@
+{
+  "node": {
+    "6044ecd1d24b1ef7b309151e9c08462590b83f8be9": {
+      "workers": {
+        "app/inbox/[id]/page": {
+          "moduleId": 84332,
+          "async": false,
+          "exportedName": "sendMessageAction",
+          "filename": "apps/web/app/inbox/actions.ts"
+        }
+      },
+      "exportedName": "sendMessageAction",
+      "filename": "apps/web/app/inbox/actions.ts"
+    },
+    "7096dfaff1e222fd7118dda697aabbc3d367487364": {
+      "workers": {
+        "app/inbox/[id]/page": {
+          "moduleId": 84332,
+          "async": false,
+          "exportedName": "sendTemplateAction",
+          "filename": "apps/web/app/inbox/actions.ts"
+        }
+      },
+      "exportedName": "sendTemplateAction",
+      "filename": "apps/web/app/inbox/actions.ts"
+    },
+    "600bee3ba8872d56793a422bfc6578a1e87550487e": {
+      "workers": {
+        "app/inbox/[id]/page": {
+          "moduleId": 84332,
+          "async": false,
+          "exportedName": "setConversationStateAction",
+          "filename": "apps/web/app/inbox/actions.ts"
+        }
+      },
+      "exportedName": "setConversationStateAction",
+      "filename": "apps/web/app/inbox/actions.ts"
+    }
+  },
+  "edge": {}
+}

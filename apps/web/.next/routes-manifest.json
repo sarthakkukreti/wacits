@@ -1,0 +1,152 @@
+{
+  "version": 3,
+  "pages404": true,
+  "appType": "app",
+  "caseSensitive": false,
+  "basePath": "",
+  "redirects": [
+    {
+      "source": "/:path+/",
+      "destination": "/:path+",
+      "internal": true,
+      "priority": true,
+      "statusCode": 308,
+      "regex": "^(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))/$"
+    }
+  ],
+  "headers": [],
+  "onMatchHeaders": [],
+  "rewrites": {
+    "beforeFiles": [],
+    "afterFiles": [],
+    "fallback": []
+  },
+  "dynamicRoutes": [
+    {
+      "page": "/api/conversations/[id]",
+      "regex": "^/api/conversations/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/conversations/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/campaigns/[id]",
+      "regex": "^/campaigns/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/campaigns/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/campaigns/[id]/recipients",
+      "regex": "^/campaigns/([^/]+?)/recipients(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/campaigns/(?<nxtPid>[^/]+?)/recipients(?:/)?$"
+    },
+    {
+      "page": "/contacts/[id]",
+      "regex": "^/contacts/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/contacts/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/inbox/[id]",
+      "regex": "^/inbox/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/inbox/(?<nxtPid>[^/]+?)(?:/)?$"
+    }
+  ],
+  "staticRoutes": [
+    {
+      "page": "/",
+      "regex": "^/(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/(?:/)?$"
+    },
+    {
+      "page": "/_global-error",
+      "regex": "^/_global\\-error(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_global\\-error(?:/)?$"
+    },
+    {
+      "page": "/_not-found",
+      "regex": "^/_not\\-found(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_not\\-found(?:/)?$"
+    },
+    {
+      "page": "/campaigns",
+      "regex": "^/campaigns(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/campaigns(?:/)?$"
+    },
+    {
+      "page": "/campaigns/new",
+      "regex": "^/campaigns/new(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/campaigns/new(?:/)?$"
+    },
+    {
+      "page": "/contacts",
+      "regex": "^/contacts(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/contacts(?:/)?$"
+    },
+    {
+      "page": "/contacts/import",
+      "regex": "^/contacts/import(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/contacts/import(?:/)?$"
+    },
+    {
+      "page": "/inbox",
+      "regex": "^/inbox(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/inbox(?:/)?$"
+    },
+    {
+      "page": "/inbox/new",
+      "regex": "^/inbox/new(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/inbox/new(?:/)?$"
+    },
+    {
+      "page": "/settings",
+      "regex": "^/settings(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/settings(?:/)?$"
+    },
+    {
+      "page": "/templates",
+      "regex": "^/templates(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/templates(?:/)?$"
+    }
+  ],
+  "dataRoutes": [],
+  "rsc": {
+    "header": "rsc",
+    "varyHeader": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch",
+    "prefetchHeader": "next-router-prefetch",
+    "didPostponeHeader": "x-nextjs-postponed",
+    "contentTypeHeader": "text/x-component",
+    "suffix": ".rsc",
+    "prefetchSegmentHeader": "next-router-segment-prefetch",
+    "prefetchSegmentSuffix": ".segment.rsc",
+    "prefetchSegmentDirSuffix": ".segments",
+    "clientParamParsing": false,
+    "dynamicRSCPrerender": false
+  },
+  "rewriteHeaders": {
+    "pathHeader": "x-nextjs-rewritten-path",
+    "queryHeader": "x-nextjs-rewritten-query"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@wacits/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p ${WEB_PORT:-3000}",
+    "build": "next build",
+    "start": "next start -p ${WEB_PORT:-3000}",
+    "package:hostinger": "next build && bash scripts/package-standalone.sh",
+    "deploy:hostinger": "bash scripts/deploy-hostinger.sh"
+  },
+  "dependencies": {
+    "next": "^16.2.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.7.2"
+  }
+}

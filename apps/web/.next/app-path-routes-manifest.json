@@ -1,0 +1,18 @@
+{
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found",
+  "/api/conversations/[id]/route": "/api/conversations/[id]",
+  "/campaigns/[id]/page": "/campaigns/[id]",
+  "/campaigns/[id]/recipients/page": "/campaigns/[id]/recipients",
+  "/campaigns/new/page": "/campaigns/new",
+  "/campaigns/page": "/campaigns",
+  "/contacts/[id]/page": "/contacts/[id]",
+  "/contacts/import/page": "/contacts/import",
+  "/contacts/page": "/contacts",
+  "/inbox/[id]/page": "/inbox/[id]",
+  "/inbox/new/page": "/inbox/new",
+  "/inbox/page": "/inbox",
+  "/page": "/",
+  "/settings/page": "/settings",
+  "/templates/page": "/templates"
+}

@@ -1,0 +1,17 @@
+{
+  "node": {
+    "60c7c32480e95141b9ef7fb80ed5de5671e9591b18": {
+      "workers": {
+        "app/inbox/new/page": {
+          "moduleId": 21907,
+          "async": false,
+          "exportedName": "startChatAction",
+          "filename": "apps/web/app/inbox/actions.ts"
+        }
+      },
+      "exportedName": "startChatAction",
+      "filename": "apps/web/app/inbox/actions.ts"
+    }
+  },
+  "edge": {}
+}

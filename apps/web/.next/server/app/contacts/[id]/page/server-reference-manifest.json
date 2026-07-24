@@ -1,0 +1,53 @@
+{
+  "node": {
+    "40d0744c88026207dde8a3523e24a0294ebe80ce61": {
+      "workers": {
+        "app/contacts/[id]/page": {
+          "moduleId": 30297,
+          "async": false,
+          "exportedName": "archiveContactAction",
+          "filename": "apps/web/app/contacts/actions.ts"
+        }
+      },
+      "exportedName": "archiveContactAction",
+      "filename": "apps/web/app/contacts/actions.ts"
+    },
+    "40f29ee7e1769dfd3262f206f128cc9b882dfb8fce": {
+      "workers": {
+        "app/contacts/[id]/page": {
+          "moduleId": 30297,
+          "async": false,
+          "exportedName": "optInAction",
+          "filename": "apps/web/app/contacts/actions.ts"
+        }
+      },
+      "exportedName": "optInAction",
+      "filename": "apps/web/app/contacts/actions.ts"
+    },
+    "4073dcbe887aaba4623b6dec955a4596c68180609f": {
+      "workers": {
+        "app/contacts/[id]/page": {
+          "moduleId": 30297,
+          "async": false,
+          "exportedName": "optOutAction",
+          "filename": "apps/web/app/contacts/actions.ts"
+        }
+      },
+      "exportedName": "optOutAction",
+      "filename": "apps/web/app/contacts/actions.ts"
+    },
+    "7071b46c3c0414a3795b4a16a77116c6c53bbee10f": {
+      "workers": {
+        "app/contacts/[id]/page": {
+          "moduleId": 30297,
+          "async": false,
+          "exportedName": "updateContactAction",
+          "filename": "apps/web/app/contacts/actions.ts"
+        }
+      },
+      "exportedName": "updateContactAction",
+      "filename": "apps/web/app/contacts/actions.ts"
+    }
+  },
+  "edge": {}
+}

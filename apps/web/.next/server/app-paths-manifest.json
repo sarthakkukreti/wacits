@@ -1,0 +1,18 @@
+{
+  "/_global-error/page": "app/_global-error/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/conversations/[id]/route": "app/api/conversations/[id]/route.js",
+  "/campaigns/[id]/page": "app/campaigns/[id]/page.js",
+  "/campaigns/[id]/recipients/page": "app/campaigns/[id]/recipients/page.js",
+  "/campaigns/new/page": "app/campaigns/new/page.js",
+  "/campaigns/page": "app/campaigns/page.js",
+  "/contacts/[id]/page": "app/contacts/[id]/page.js",
+  "/contacts/import/page": "app/contacts/import/page.js",
+  "/contacts/page": "app/contacts/page.js",
+  "/inbox/[id]/page": "app/inbox/[id]/page.js",
+  "/inbox/new/page": "app/inbox/new/page.js",
+  "/inbox/page": "app/inbox/page.js",
+  "/page": "app/page.js",
+  "/settings/page": "app/settings/page.js",
+  "/templates/page": "app/templates/page.js"
+}

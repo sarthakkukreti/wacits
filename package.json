@@ -1,0 +1,15 @@
+{
+  "name": "wacits-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pre-built Next.js standalone output — already built, versions pinned to the build.",
+  "scripts": {
+    "build": "echo 'Already built at package time — nothing to do.'",
+    "start": "node apps/web/server.js"
+  },
+  "dependencies": {
+    "next": "16.2.11",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  }
+}

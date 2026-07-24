@@ -1,0 +1,29 @@
+{
+  "node": {
+    "600d2e091fcf2208a78926d469b487cf567a3ed8ca": {
+      "workers": {
+        "app/campaigns/new/page": {
+          "moduleId": 81264,
+          "async": false,
+          "exportedName": "createCampaignAction",
+          "filename": "apps/web/app/campaigns/actions.ts"
+        }
+      },
+      "exportedName": "createCampaignAction",
+      "filename": "apps/web/app/campaigns/actions.ts"
+    },
+    "406df003deee17d05ce801c15aec7dd80c882ad53b": {
+      "workers": {
+        "app/campaigns/new/page": {
+          "moduleId": 81264,
+          "async": false,
+          "exportedName": "previewAudienceAction",
+          "filename": "apps/web/app/campaigns/actions.ts"
+        }
+      },
+      "exportedName": "previewAudienceAction",
+      "filename": "apps/web/app/campaigns/actions.ts"
+    }
+  },
+  "edge": {}
+}

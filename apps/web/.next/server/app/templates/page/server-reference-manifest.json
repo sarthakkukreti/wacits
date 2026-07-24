@@ -1,0 +1,17 @@
+{
+  "node": {
+    "00cf9790d41b32fafafb5e15dcb00cfec6d8d090d1": {
+      "workers": {
+        "app/templates/page": {
+          "moduleId": 30305,
+          "async": false,
+          "exportedName": "syncTemplatesAction",
+          "filename": "apps/web/app/templates/actions.ts"
+        }
+      },
+      "exportedName": "syncTemplatesAction",
+      "filename": "apps/web/app/templates/actions.ts"
+    }
+  },
+  "edge": {}
+}

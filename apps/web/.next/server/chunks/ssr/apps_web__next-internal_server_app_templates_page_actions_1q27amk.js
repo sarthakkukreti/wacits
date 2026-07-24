@@ -1,0 +1,3 @@
+module.exports=[30305,a=>{"use strict";var b=a.i(17306),c=a.i(87510),d=a.i(85806);async function e(){try{let a=await (0,d.api)("/workspace/templates/sync",{method:"POST"});return(0,c.revalidatePath)("/templates"),(0,c.revalidatePath)("/campaigns/new"),{ok:!0,...a}}catch(a){return{ok:!1,error:a instanceof d.ApiError?a.message:String(a)}}}(0,a.i(28349).ensureServerEntryExports)([e]),(0,b.registerServerReference)(e,"00cf9790d41b32fafafb5e15dcb00cfec6d8d090d1",null),a.s([],94114),a.i(94114),a.s(["00cf9790d41b32fafafb5e15dcb00cfec6d8d090d1",0,e],30305)}];
+
+//# sourceMappingURL=apps_web__next-internal_server_app_templates_page_actions_1q27amk.js.map

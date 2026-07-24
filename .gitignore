@@ -1,0 +1,2 @@
+# Intentionally empty. This branch ships build output, including a vendored
+# node_modules — that is the entire point (the host installs nothing).

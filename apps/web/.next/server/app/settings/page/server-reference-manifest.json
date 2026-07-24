@@ -1,0 +1,17 @@
+{
+  "node": {
+    "608e2d966cd2bc5f4f79e8db907865ba2586247f7c": {
+      "workers": {
+        "app/settings/page": {
+          "moduleId": 35223,
+          "async": false,
+          "exportedName": "addSenderNumberAction",
+          "filename": "apps/web/app/settings/actions.ts"
+        }
+      },
+      "exportedName": "addSenderNumberAction",
+      "filename": "apps/web/app/settings/actions.ts"
+    }
+  },
+  "edge": {}
+}
