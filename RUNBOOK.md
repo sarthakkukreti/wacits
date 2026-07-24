@@ -164,26 +164,15 @@ change. Not needed here since Coolify already exists on this VPS.
 
 ### Frontend (Hostinger)
 
-Hostinger's Node.js App wizard supports two ways in: connecting a GitHub
-repo directly, or uploading a `.zip`. **Use the GitHub route, pointed at
-the generated `hostinger-deploy` branch:**
+Hostinger is connected to this GitHub repo and auto-deploys **`main`** on
+push. It clones the repo, runs `npm install` at the root, then `npm run
+build`, then `npm start`. Nothing about that sequence is configurable
+enough to avoid, so the repo root has to satisfy it directly — hence the
+`build` and `start` scripts in the root `package.json`, which are the only
+npm entry points in an otherwise Bun-only repo.
 
-```
-cd apps/web
-bun run deploy:hostinger
-```
-
-That builds the app, prepares the standalone output, and force-pushes it
-to `origin/hostinger-deploy` — a generated orphan branch holding build
-output only. Point Hostinger at that branch, startup file `server.js`,
-and it deploys on push. Never merge that branch into `main`, never branch
-off it, and never edit it by hand; change the source on `main` and re-run.
-
-**Do not point Hostinger at `main`.** Hostinger clones the repo and runs
-`npm install` in the application root unconditionally. Against `main`
-that reads the monorepo root `package.json`, follows `"workspaces":
-["apps/*", "packages/*"]` into `apps/api` and `packages/db`, and dies on
-Bun's workspace protocol, which npm does not implement:
+**Why the backend packages say `"*"` and not `"workspace:*"`.** They used
+the latter, and it broke every Hostinger deploy for three days:
 
 ```
 npm error code EUNSUPPORTEDPROTOCOL
@@ -191,31 +180,41 @@ npm error Unsupported URL Type "workspace:": workspace:*
 ERROR: Failed to install dependencies
 ```
 
-There is no Hostinger setting that skips that install step, and rewriting
-the backend packages to npm-compatible specifiers would change dependency
-resolution for the working Docker/Bun deployment on the VPS purely to
-satisfy the frontend host. The deploy branch sidesteps it: its root
-`package.json` declares only plain-registry packages, so npm never reaches
-a `workspace:` reference.
+`workspace:` is a Bun/pnpm protocol npm does not implement. npm reads the
+root `package.json`, follows `"workspaces": ["apps/*", "packages/*"]` into
+`apps/api` and `packages/db`, and dies there — even though the dashboard
+itself depends on none of them. **Pointing Hostinger's root directory at
+`apps/web` does not help**: npm walks *up* looking for a workspace root,
+finds this one, and fails identically. Verified by running `npm install`
+inside `apps/web` with the full repo present.
 
-**That root `package.json` must keep its dependencies.** An empty one was
-tried first and is actively destructive — npm treats every vendored
-package as extraneous and prunes it (`removed 9 packages`), leaving
-`node_modules` with only `@next/` and `@swc/`: no `next`, no `react`, no
-`react-dom`, and an app that cannot boot. Declaring them keeps the tree
-intact and lets npm reinstall anything the tracer left incomplete. They
-are pinned to the exact versions the build resolved, read back out of the
-built tree rather than copied from `apps/web/package.json` (those are
-ranges like `^16.2.0`, and a range lets the host install a different
-Next.js than the one that produced `.next/`). Letting npm install run also
-fixes `sharp` properly — see below.
+Plain `"*"` resolves to the same local package under both managers — a
+dependency whose name matches a workspace member is linked from disk, and
+`*` satisfies any version. Confirmed both ways: `bun install` still
+symlinks `apps/api/node_modules/@wacits/db -> packages/db` and the backend
+imports resolve, and `npm install` links `node_modules/@wacits/db ->
+../../packages/db`. **Do not change these back to `workspace:*`** — it
+gains nothing and re-breaks the frontend deploy.
 
-A `.zip` is still available via `bun run package:hostinger` for hosts
-without a git integration; it produces `apps/web/wacits-web.zip` from the
-same prepared output. Either way, **verify the same way before trusting
-it**: extract what actually gets deployed into a directory that has never
-seen this repo, run `npm install && npm run build && npm start` with plain
-`node` (not Bun), and hit the running app.
+`npm start` runs the standalone server directly rather than `next start`,
+because `next.config.ts` sets `output: "standalone"` and Next refuses to
+serve that (`"next start" does not work with "output: standalone"
+configuration`). The root `build` script therefore also runs
+`apps/web/scripts/prepare-standalone.sh`, which assembles that output and
+writes the root `server.js` shim `npm start` launches. `apps/web`'s own
+`start` prefers `$PORT` over `$WEB_PORT` so Hostinger's assigned port
+wins.
+
+A `.zip` is still available via `bun run package:hostinger`, and
+`bun run deploy:hostinger` publishes the same prepared output to a
+generated `hostinger-deploy` branch — both are fallbacks for hosts without
+a working git integration, and neither is what this domain uses today.
+
+**Verify any of these paths the same way before trusting it**: export the
+tree into a directory that has never seen this repo, run `npm install &&
+npm run build && npm start` with plain `node` (not Bun), hit every route,
+and confirm a `/_next/static/...` asset returns 200 — a standalone build
+that serves HTML but 404s its CSS is the classic failure here.
 
 For the zip path, in Hostinger's hPanel:
 

@@ -8,8 +8,8 @@
     "start": "bun run src/index.ts"
   },
   "dependencies": {
-    "@wacits/db": "workspace:*",
-    "@wacits/queue": "workspace:*",
+    "@wacits/db": "*",
+    "@wacits/queue": "*",
     "drizzle-orm": ">=0.45.2",
     "hono": "^4.12.0"
   },

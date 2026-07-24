@@ -14,9 +14,9 @@
     "start:webhook": "bun run src/webhook-worker.ts"
   },
   "dependencies": {
-    "@wacits/db": "workspace:*",
-    "@wacits/queue": "workspace:*",
-    "@wacits/shared": "workspace:*",
+    "@wacits/db": "*",
+    "@wacits/queue": "*",
+    "@wacits/shared": "*",
     "bullmq": ">=5.80.9",
     "drizzle-orm": ">=0.45.2"
   }
