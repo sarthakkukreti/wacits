@@ -65,6 +65,43 @@ if [ -n "$remaining" ]; then
   exit 1
 fi
 
+# Hostinger's Node.js wizard (Passenger) inspects the application ROOT for a
+# package.json and, if it finds a `build` script, runs `npm install && npm run
+# build` on deploy. That is exactly wrong here: this output is ALREADY built,
+# its node_modules is a pruned production tree with no devDependencies, and
+# `next build` needs typescript/@types — so the hosted build fails ("Last build
+# failed!") and nothing ever starts. Observed live on Hostinger.
+#
+# Next's own standalone output leaves the root bare (only apps/ and
+# node_modules/ — the nested apps/web/package.json it copies still carries the
+# source `build` script). So write a root package.json that declares ONLY a
+# start script and no dependencies: nothing for the host to install, nothing
+# for it to build.
+REL_APP_DIR="${APP_DIR#.next/standalone/}"
+cat > ".next/standalone/package.json" <<EOF
+{
+  "name": "wacits-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "node $REL_APP_DIR/server.js"
+  }
+}
+EOF
+
+# Next nests the real server under apps/web/server.js in a workspaces monorepo,
+# but Hostinger's wizard defaults its startup field to a root-level file and
+# typing the nested path by hand is the single most common way to misconfigure
+# this. A one-line root shim makes plain `server.js` correct too — safe because
+# the nested server.js does its own process.chdir(__dirname), so it does not
+# care where it is required from.
+cat > ".next/standalone/server.js" <<EOF
+// Entry point for hosts that expect a root-level startup file (Hostinger /
+// Passenger). The real server lives in the nested standalone output; it
+// chdir()s to its own directory on startup, so requiring it from here is safe.
+require("./$REL_APP_DIR/server.js");
+EOF
+
 rm -f wacits-web.zip
 (cd .next/standalone && zip -r -q ../../wacits-web.zip . -x '*.map')
 
@@ -73,5 +110,6 @@ echo
 echo "Wrote apps/web/wacits-web.zip ($SIZE)."
 echo "In the Hostinger Node.js App wizard:"
 echo "  - Framework: 'Other'"
-echo "  - Startup / entry file: ${APP_DIR#.next/standalone/}/server.js"
-echo "  - Set API_BASE_URL (and any other required env vars) in the app's environment-variable settings."
+echo "  - Startup / entry file: server.js   (root shim; $REL_APP_DIR/server.js also works)"
+echo "  - Build command: leave EMPTY — this package is already built."
+echo "  - Set API_BASE_URL, API_SHARED_SECRET and WORKSPACE_SLUG in the app's environment-variable settings."
