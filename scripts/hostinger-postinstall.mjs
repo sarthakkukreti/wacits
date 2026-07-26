@@ -21,6 +21,9 @@
 
 import { execSync } from "node:child_process";
 
+// Matches PassengerRestartDir in apps/web/scripts/hostinger.htaccess.
+const PASSENGER_RESTART_DIR = "tmp";
+
 const userAgent = process.env.npm_config_user_agent ?? "";
 const isNpm = userAgent.startsWith("npm/");
 
@@ -61,4 +64,23 @@ try {
   console.error("[postinstall] Could not install .htaccess:", error.message);
   // Non-fatal: the build already succeeded, and the .htaccess may have been
   // placed by hand. Do not fail the deploy over this.
+}
+
+// Force Passenger to restart. It does not notice a new deploy on its own —
+// touching a file under PassengerRestartDir is the documented signal, and
+// skipping this step is exactly how a stale worker process from the PREVIOUS
+// build keeps serving requests: it already has the old build's static/chunk
+// filenames resolved, so hashed chunk names that changed in the new build
+// 404, which surfaces to users as "This page couldn't load". A file move to
+// the same directory the previous deploy left tmp/ in doesn't survive
+// between deploys either, so recreate it every time rather than assume it.
+try {
+  const { mkdirSync, writeFileSync, existsSync } = await import("node:fs");
+  if (existsSync(".builds")) {
+    mkdirSync(PASSENGER_RESTART_DIR, { recursive: true });
+    writeFileSync(`${PASSENGER_RESTART_DIR}/restart.txt`, "");
+    console.log("[postinstall] Touched restart.txt to force Passenger to reload the app.");
+  }
+} catch (error) {
+  console.error("[postinstall] Could not touch restart.txt:", error.message);
 }
