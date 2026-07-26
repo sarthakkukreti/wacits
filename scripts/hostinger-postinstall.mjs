@@ -35,6 +35,7 @@ if (!isNpm) {
 }
 
 console.log("[postinstall] npm detected — building the dashboard for deployment.");
+console.log("[postinstall] cwd:", process.cwd());
 
 try {
   execSync("npm run build", { stdio: "inherit" });
@@ -48,17 +49,24 @@ try {
 // checkout and returns 403. The document root IS this checkout (npm install
 // runs here), so copy the tracked template to ./.htaccess. Doing it from
 // postinstall makes it durable — a hand edit on the server survived earlier
-// redeploys, but relying on that is fragile; this guarantees it. Only write
-// when the marker is present so this is a no-op anywhere that is not this
-// checkout's own document root.
+// redeploys, but relying on that is fragile; this guarantees it.
+//
+// This used to also check existsSync(".builds") to avoid running anywhere
+// that isn't Hostinger's document root, on top of the isNpm check above.
+// That combination is already enough: nothing outside Hostinger's deploy
+// ever runs `npm install` on this repo (everywhere else uses Bun). The extra
+// check was actively harmful — Hostinger's own build step runs BEFORE
+// `.builds` exists in whatever directory this executes in, so it made the
+// install silently skip on some deploys and not others for no reason tied
+// to correctness.
 try {
   const { copyFileSync, existsSync } = await import("node:fs");
   const src = "apps/web/scripts/hostinger.htaccess";
-  if (existsSync(src) && existsSync(".builds")) {
+  if (existsSync(src)) {
     copyFileSync(src, ".htaccess");
     console.log("[postinstall] Installed Passenger .htaccess into the document root.");
   } else {
-    console.log("[postinstall] Skipping .htaccess install — not the Hostinger document root.");
+    console.log("[postinstall] Skipping .htaccess install — template not found at", src);
   }
 } catch (error) {
   console.error("[postinstall] Could not install .htaccess:", error.message);
@@ -75,12 +83,10 @@ try {
 // the same directory the previous deploy left tmp/ in doesn't survive
 // between deploys either, so recreate it every time rather than assume it.
 try {
-  const { mkdirSync, writeFileSync, existsSync } = await import("node:fs");
-  if (existsSync(".builds")) {
-    mkdirSync(PASSENGER_RESTART_DIR, { recursive: true });
-    writeFileSync(`${PASSENGER_RESTART_DIR}/restart.txt`, "");
-    console.log("[postinstall] Touched restart.txt to force Passenger to reload the app.");
-  }
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  mkdirSync(PASSENGER_RESTART_DIR, { recursive: true });
+  writeFileSync(`${PASSENGER_RESTART_DIR}/restart.txt`, "");
+  console.log("[postinstall] Touched restart.txt to force Passenger to reload the app.");
 } catch (error) {
   console.error("[postinstall] Could not touch restart.txt:", error.message);
 }
