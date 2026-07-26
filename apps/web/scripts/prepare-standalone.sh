@@ -33,6 +33,26 @@ mkdir -p "$APP_DIR/.next"
 rm -rf "$APP_DIR/.next/static"
 cp -r .next/static "$APP_DIR/.next/static"
 
+# Also mirror static/ to the repo root as ./_next/static (repo root == the
+# Hostinger document root; apps/web is one level down). This is a second copy
+# of the same files, not a replacement for the one above — plain `node
+# server.js` with no web server in front still needs $APP_DIR/.next/static.
+#
+# On Hostinger, requests for /_next/static/* reliably 404'd through Passenger
+# even though the file existed at $APP_DIR/.next/static and a fresh restart
+# didn't help — reproduced repeatedly across separate builds against one
+# specific Next-internal runtime chunk (the server-actions bridge), same
+# content, different content hash each time, so this isn't a one-off fluke.
+# Passenger/Apache serves an existing file straight from disk without
+# invoking the app at all when it sits at the literal path the URL maps to
+# under the document root, so a copy at the URL's natural location sidesteps
+# whatever is wrong with the app's own static handling entirely — and is
+# also just faster, since Apache serves it directly instead of proxying
+# through Node.
+rm -rf ../_next/static
+mkdir -p ../_next
+cp -r .next/static ../_next/static
+
 # public/ is optional in Next.js — only copy it if this app actually has one.
 if [ -d "public" ]; then
   rm -rf "$APP_DIR/public"

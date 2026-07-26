@@ -14,3 +14,7 @@ pnpm-lock.yaml
 # Packaged Hostinger deployment artifact (see apps/web/scripts) — a build
 # output, never committed.
 wacits-web.zip
+# Repo-root mirror of apps/web/.next/static, written by prepare-standalone.sh
+# so Hostinger's web server can serve /_next/static/* directly (see that
+# script for why). A build output, never committed.
+/_next/
