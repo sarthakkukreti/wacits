@@ -39,3 +39,26 @@ try {
   console.error("[postinstall] Dashboard build failed.");
   process.exit(1);
 }
+
+// Install the Passenger/LiteSpeed wiring. Hostinger creates the Node app but
+// never writes these directives, so without them Apache serves the git
+// checkout and returns 403. The document root IS this checkout (npm install
+// runs here), so copy the tracked template to ./.htaccess. Doing it from
+// postinstall makes it durable — a hand edit on the server survived earlier
+// redeploys, but relying on that is fragile; this guarantees it. Only write
+// when the marker is present so this is a no-op anywhere that is not this
+// checkout's own document root.
+try {
+  const { copyFileSync, existsSync } = await import("node:fs");
+  const src = "apps/web/scripts/hostinger.htaccess";
+  if (existsSync(src) && existsSync(".builds")) {
+    copyFileSync(src, ".htaccess");
+    console.log("[postinstall] Installed Passenger .htaccess into the document root.");
+  } else {
+    console.log("[postinstall] Skipping .htaccess install — not the Hostinger document root.");
+  }
+} catch (error) {
+  console.error("[postinstall] Could not install .htaccess:", error.message);
+  // Non-fatal: the build already succeeded, and the .htaccess may have been
+  // placed by hand. Do not fail the deploy over this.
+}

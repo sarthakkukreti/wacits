@@ -1,0 +1,25 @@
+# Passenger/LiteSpeed wiring for the dashboard on Hostinger.
+#
+# Hostinger creates the Node app but does NOT write these directives itself —
+# without them Apache serves the (index-less) git checkout and returns 403.
+# The document root IS the repo checkout, so postinstall copies this file to
+# <docroot>/.htaccess on every deploy (see scripts/hostinger-postinstall.mjs),
+# keeping it durable rather than a one-off hand edit that a redeploy could drop.
+#
+# The absolute path is fixed for this account/domain; if the app ever moves,
+# update PassengerAppRoot and PassengerRestartDir together.
+PassengerAppRoot /home/u310526385/domains/wacits.cyberlative.com/public_html
+PassengerAppType node
+PassengerNodejs /opt/alt/alt-nodejs22/root/bin/node
+PassengerStartupFile apps/web/.next/standalone/server.js
+PassengerBaseURI /
+PassengerRestartDir /home/u310526385/domains/wacits.cyberlative.com/public_html/tmp
+SetEnv LSNODE_CONSOLE_LOG console.log
+
+# The document root is the repo checkout, so refuse to serve anything that must
+# never be public even if Passenger falls through to static handling.
+RewriteEngine On
+RewriteRule ^\.builds - [F,L]
+RewriteRule ^\.git - [F,L]
+RewriteRule ^\.env - [F,L]
+RewriteRule ^(docker-compose|Caddyfile|bun\.lock|package-lock\.json|tsconfig) - [F,L]
