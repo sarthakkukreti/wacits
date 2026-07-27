@@ -1,4 +1,10 @@
-import { parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js";
+// The default `libphonenumber-js` export ships "min" metadata, which omits
+// the per-range number-type data this file needs: `getType()` on a min-built
+// parse returns `undefined` for every Indian number, mobile or landline
+// alike, silently defeating the landline check below. `/max` carries the
+// full metadata so India's mobile ranges (6/7/8/9-series) are distinguishable
+// from its STD landline ranges.
+import { parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js/max";
 
 /**
  * PRD §8 / DM-5 — every phone number is stored normalised to E.164, and the
@@ -35,7 +41,7 @@ export type NormalisedPhone = {
 export type PhoneError = {
   ok: false;
   raw: string;
-  reason: "empty" | "unparseable" | "invalid";
+  reason: "empty" | "unparseable" | "invalid" | "landline";
   message: string;
 };
 
@@ -45,8 +51,20 @@ export type PhoneError = {
  * `defaultRegion` is only consulted when the input has no `+` prefix — a
  * bare "9876543210" in an Indian client's import is an Indian number, but
  * "+14155552671" is always a US number regardless of the default.
+ *
+ * `requireMobile` defaults to true because every caller in this codebase
+ * except one is normalising a *contact* — someone WhatsApp messages are
+ * sent to, where CT-8 applies. The one exception is the WABA's own
+ * `display_phone_number` in routes/settings.ts: Meta explicitly allows a
+ * landline there, verified by voice call instead of SMS, since it is never
+ * dialled as a handset. That call site passes `requireMobile: false`
+ * explicitly rather than this function guessing from context.
  */
-export function normalisePhone(raw: string, defaultRegion: CountryCode = DEFAULT_REGION): NormalisedPhone | PhoneError {
+export function normalisePhone(
+  raw: string,
+  defaultRegion: CountryCode = DEFAULT_REGION,
+  requireMobile = true,
+): NormalisedPhone | PhoneError {
   const trimmed = (raw ?? "").trim();
   if (!trimmed) {
     return { ok: false, raw, reason: "empty", message: "No phone number provided." };
@@ -71,6 +89,20 @@ export function normalisePhone(raw: string, defaultRegion: CountryCode = DEFAULT
       raw,
       reason: "invalid",
       message: `Not a valid number for ${parsed.country ?? "the detected region"}.`,
+    };
+  }
+
+  // CT-8: an Indian number must validate as mobile-capable; a landline is
+  // rejected, not silently accepted. Scoped to IN specifically — this is
+  // CITS product policy for the region v1 actually serves, and the number
+  // ranges that make it possible (6/7/8/9-series mobile vs. STD landline
+  // codes) are not a general property libphonenumber can assert worldwide.
+  if (requireMobile && parsed.country === "IN" && parsed.getType() !== "MOBILE") {
+    return {
+      ok: false,
+      raw,
+      reason: "landline",
+      message: "This is a landline number. Only mobile numbers can receive WhatsApp messages.",
     };
   }
 
