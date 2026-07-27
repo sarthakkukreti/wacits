@@ -2,6 +2,7 @@ import Link from "next/link";
 import { apiSafe } from "../../../lib/api";
 import { formatDateTime } from "../../../lib/format";
 import { ContactDetail } from "../../../components/ContactDetail";
+import { ContactLabels } from "../../../components/ContactLabels";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,7 @@ type Response = {
     source: string | null;
   };
   tags: { id: string; name: string; color: string | null }[];
+  groups: { id: string; name: string }[];
   consent: {
     id: string;
     direction: string;
@@ -41,7 +43,11 @@ type Response = {
 
 export default async function ContactPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const result = await apiSafe<Response>(`/workspace/contacts/${id}`);
+  const [result, groupList, tagList] = await Promise.all([
+    apiSafe<Response>(`/workspace/contacts/${id}`),
+    apiSafe<{ groups: { id: string; name: string }[] }>("/workspace/contacts/meta/groups"),
+    apiSafe<{ tags: { id: string; name: string; color: string | null }[] }>("/workspace/contacts/meta/tags"),
+  ]);
 
   if (!result.ok) {
     return (
@@ -62,7 +68,7 @@ export default async function ContactPage({ params }: { params: Promise<{ id: st
     );
   }
 
-  const { contact: c, consent, suppressed } = result.data;
+  const { contact: c, consent, suppressed, tags, groups } = result.data;
   const name = [c.firstName, c.lastName].filter(Boolean).join(" ") || c.phoneNumber;
 
   return (
@@ -89,6 +95,14 @@ export default async function ContactPage({ params }: { params: Promise<{ id: st
             <ContactDetail contact={c} />
 
             <div>
+              <ContactLabels
+                contactId={c.id}
+                groups={groups}
+                tags={tags}
+                allGroups={groupList.ok ? groupList.data.groups : []}
+                allTags={tagList.ok ? tagList.data.tags : []}
+              />
+
               <div className="card mb-16">
                 <div className="card-head">
                   <h2>Activity</h2>

@@ -487,3 +487,85 @@ input:focus, select:focus, textarea:focus {
 .step.active .step-num { background: var(--brand); color: #fff; }
 .step.done .step-num { background: var(--ok-bg); color: var(--ok); }
 .step-line { width: 22px; height: 1px; background: var(--border-strong); }
+
+/* ---------- Labels: group and tag chips ---------- */
+
+.chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 190px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.chip > span { overflow: hidden; text-overflow: ellipsis; }
+
+/* A group is a static list — the stronger, "belongs to" affordance. */
+.chip-group { border-color: transparent; background: var(--info-bg); color: var(--info); }
+.chip-tag { border-style: dashed; }
+
+.chip-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+
+.chip-x {
+  border: none;
+  background: none;
+  padding: 0 0 0 1px;
+  margin: 0;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.55;
+  font-size: 13px;
+  line-height: 1;
+  font-family: inherit;
+}
+.chip-x:hover { opacity: 1; }
+.chip-x:disabled { cursor: default; opacity: 0.3; }
+
+/* ---------- Bulk selection bar ---------- */
+
+.bulkbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--info-bg);
+}
+.bulkbar-count { font-size: 13px; font-weight: 650; color: var(--info); white-space: nowrap; }
+.bulkbar select, .bulkbar input { height: 32px; font-size: 13px; }
+.bulkbar select { width: auto; min-width: 150px; }
+.bulkbar input { width: 190px; }
+
+.select-all-note {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.select-all-note button {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 650;
+  color: var(--brand-light);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.check-cell { width: 34px; text-align: center; padding-right: 0 !important; }
+.check-cell input { width: 15px; height: 15px; cursor: pointer; accent-color: var(--brand-light); }
+
+/* A label value that is too long to be a label — flagged in the import preview. */
+.chip-bad { border-color: var(--danger); color: var(--danger); background: var(--danger-bg); }

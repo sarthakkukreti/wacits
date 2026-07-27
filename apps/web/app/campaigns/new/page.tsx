@@ -9,7 +9,7 @@ export default async function NewCampaignPage() {
     apiSafe<{
       templates: { id: string; name: string; language: string; status: string; latestVersionId: string | null; components: any }[];
     }>("/workspace/templates?approved=true"),
-    apiSafe<{ groups: { id: string; name: string; memberCount: number }[] }>("/workspace/campaigns/meta/groups"),
+    apiSafe<{ groups: { id: string; name: string; memberCount: number }[] }>("/workspace/contacts/meta/groups"),
     apiSafe<{ total: number }>("/workspace/contacts/stats"),
   ]);
 
