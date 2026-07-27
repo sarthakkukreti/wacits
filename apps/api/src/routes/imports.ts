@@ -5,10 +5,12 @@ import {
   contact,
   contactGroup,
   contactGroupMember,
+  contactTag,
   importCreatedContact,
   importError,
   importJob,
   suppressionEntry,
+  tag,
   withSystemAccess,
   withTenant,
 } from "@wacits/db";
@@ -32,6 +34,24 @@ import { getOperatorUserId } from "../lib/operator";
 const imports = new Hono();
 
 const MAX_ROWS = 50_000;
+
+/**
+ * Guards against the obvious way label mapping goes wrong: pointing it at a
+ * free-text column. A Notes column would otherwise mint one label per row.
+ * Both limits are checked before anything is written, and the preview shows
+ * the distinct values so the mistake is visible first.
+ */
+const MAX_DISTINCT_LABELS = 200;
+const MAX_LABEL_LENGTH = 80;
+
+/** One cell may carry several labels: "VIP, Renewal due". */
+function splitLabels(value: string | null | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(/[;,|]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 /**
  * The header names an operator's spreadsheet realistically uses. Matched
@@ -64,6 +84,10 @@ const HEADER_ALIASES: Record<string, { exact: string[]; contains: string[] }> = 
   state: { exact: ["state", "province", "region"], contains: ["province"] },
   language: { exact: ["language", "lang", "locale"], contains: ["language", "locale"] },
   notes: { exact: ["notes", "note", "remarks", "comment", "comments"], contains: ["remark", "comment"] },
+  // Deliberately narrow: a label column is worth detecting when the header
+  // says so outright, but guessing it from a loose match would quietly turn
+  // an arbitrary column into workspace-wide labels.
+  labels: { exact: ["label", "labels", "tag", "tags", "category", "categories"], contains: [] },
 };
 
 function canonicalise(header: string): string {
@@ -141,7 +165,11 @@ type MappedRow = {
   rowNumber: number;
   raw: Record<string, string>;
   phone: ReturnType<typeof normalisePhone>;
+  /** Contact columns only. Labels are kept out of here on purpose: `values`
+   *  is spread straight onto the contact row, and a label is a separate
+   *  entity, not a column. */
   values: Record<string, string | null>;
+  labels: string[];
 };
 
 function mapRows(rows: Record<string, string>[], mapping: Record<string, string | null>): MappedRow[] {
@@ -168,6 +196,7 @@ function mapRows(rows: Record<string, string>[], mapping: Record<string, string 
       rowNumber: i + 2, // +2: 1-indexed, plus the header row
       raw,
       phone: normalisePhone(rawPhone),
+      labels: splitLabels(pick("labels")),
       values: {
         firstName,
         lastName,
@@ -227,15 +256,37 @@ imports.post("/preview", async (c) => {
     else seen.add(e164);
   }
 
+  // What a mapped label column would produce. Counted over valid rows only,
+  // because a rejected row imports nothing and labels nothing.
+  const labelCounts = new Map<string, number>();
+  for (const r of valid) for (const name of r.labels) labelCounts.set(name, (labelCounts.get(name) ?? 0) + 1);
+  const labelNamesInFile = [...labelCounts.keys()];
+
   const uniquePhones = [...seen];
-  const { existing, suppressed } = await withTenant(clientId, async (tx) => {
-    if (!uniquePhones.length) return { existing: [] as string[], suppressed: [] as string[] };
-    const existingRows = await tx
-      .select({ phoneNumber: contact.phoneNumber })
-      .from(contact)
-      .where(inArray(contact.phoneNumber, uniquePhones));
-    return { existing: existingRows.map((r: any) => r.phoneNumber), suppressed: [] as string[] };
+  const { existing, knownLabels } = await withTenant(clientId, async (tx) => {
+    const existingRows = uniquePhones.length
+      ? await tx
+          .select({ phoneNumber: contact.phoneNumber })
+          .from(contact)
+          .where(inArray(contact.phoneNumber, uniquePhones))
+      : [];
+    const labelRows = labelNamesInFile.length
+      ? await tx.select({ name: tag.name }).from(tag).where(inArray(tag.name, labelNamesInFile))
+      : [];
+    return {
+      existing: existingRows.map((r: any) => r.phoneNumber),
+      knownLabels: new Set(labelRows.map((r: any) => r.name as string)),
+    };
   });
+
+  const labelPreview = [...labelCounts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([name, contactCount]) => ({
+      name,
+      contactCount,
+      isNew: !knownLabels.has(name),
+      tooLong: name.length > MAX_LABEL_LENGTH,
+    }));
 
   const suppressedRows = await withSystemAccess(async (tx) =>
     uniquePhones.length
@@ -256,6 +307,13 @@ imports.post("/preview", async (c) => {
     willCreateCount: uniquePhones.filter((p) => !existing.includes(p)).length,
     willUpdateCount: uniquePhones.filter((p) => existing.includes(p)).length,
     suppressedCount: suppressedRows.length,
+    // Truncated for display; the counts below describe the whole file.
+    labelPreview: labelPreview.slice(0, 30),
+    labelDistinctCount: labelPreview.length,
+    labelNewCount: labelPreview.filter((l) => l.isNew).length,
+    labelOverLimit: labelPreview.length > MAX_DISTINCT_LABELS,
+    labelTooLongCount: labelPreview.filter((l) => l.tooLong).length,
+    labelMaxDistinct: MAX_DISTINCT_LABELS,
     parseErrors,
     invalidSamples: invalid.slice(0, 25).map((r) => ({
       rowNumber: r.rowNumber,
@@ -280,6 +338,9 @@ imports.post("/commit", async (c) => {
     /** Optional: also add every imported contact to this group, so the
      *  import can be targeted as a campaign audience immediately. */
     groupName?: string;
+    /** Optional: labels applied to every imported contact, on top of
+     *  whatever `mapping.labels` produces per row. */
+    labelNames?: string[];
   }>();
 
   if (!body.csv?.trim()) return c.json({ error: "csv content is required" }, 400);
@@ -290,6 +351,30 @@ imports.post("/commit", async (c) => {
   if (rows.length > MAX_ROWS) return c.json({ error: `Too many rows (limit ${MAX_ROWS}).` }, 400);
 
   const mapped = mapRows(rows, body.mapping);
+
+  // Every label the file would touch, validated before a single row is
+  // written — a mis-mapped column should fail loudly, not halfway through.
+  const fixedLabels = [...new Set((body.labelNames ?? []).map((s) => s.trim()).filter(Boolean))];
+  const allLabelNames = new Set(fixedLabels);
+  for (const row of mapped) if (row.phone.ok) for (const name of row.labels) allLabelNames.add(name);
+
+  if (allLabelNames.size > MAX_DISTINCT_LABELS) {
+    return c.json(
+      {
+        error: `This mapping would create ${allLabelNames.size} distinct labels; the limit is ${MAX_DISTINCT_LABELS}. That usually means the label column points at free text rather than a category.`,
+      },
+      400,
+    );
+  }
+  const tooLong = [...allLabelNames].filter((n) => n.length > MAX_LABEL_LENGTH);
+  if (tooLong.length) {
+    return c.json(
+      {
+        error: `${tooLong.length} label value(s) are longer than ${MAX_LABEL_LENGTH} characters, which usually means the label column points at free text. First one: “${tooLong[0]!.slice(0, 60)}…”`,
+      },
+      400,
+    );
+  }
 
   const result = await withTenant(clientId, async (tx) => {
     const [job] = await tx
@@ -325,10 +410,44 @@ imports.post("/commit", async (c) => {
       }
     }
 
+    // Labels are created once, upfront, rather than per row — an import of
+    // 5,000 rows carrying 3 labels should touch `tag` three times.
+    const tagIdByName = new Map<string, string>();
+    let labelsCreated = 0;
+    if (allLabelNames.size) {
+      const names = [...allLabelNames];
+      const inserted = await tx
+        .insert(tag)
+        .values(names.map((name) => ({ clientId, name })))
+        .onConflictDoNothing({ target: [tag.clientId, tag.name] })
+        .returning({ id: tag.id, name: tag.name });
+      labelsCreated = inserted.length;
+
+      const allRows = await tx.select({ id: tag.id, name: tag.name }).from(tag).where(inArray(tag.name, names));
+      for (const r of allRows) tagIdByName.set(r.name, r.id);
+    }
+
     let created = 0;
     let updated = 0;
     let errored = 0;
+    let labelsApplied = 0;
     const seenInThisFile = new Set<string>();
+
+    const applyLabels = async (contactId: string, rowLabels: string[]) => {
+      const names = [...new Set([...fixedLabels, ...rowLabels])];
+      if (!names.length) return;
+      const values = names
+        .map((name) => tagIdByName.get(name))
+        .filter((tagId): tagId is string => Boolean(tagId))
+        .map((tagId) => ({ clientId, tagId, contactId, appliedBy: operatorUserId }));
+      if (!values.length) return;
+      const applied = await tx
+        .insert(contactTag)
+        .values(values)
+        .onConflictDoNothing({ target: [contactTag.tagId, contactTag.contactId] })
+        .returning({ id: contactTag.id });
+      labelsApplied += applied.length;
+    };
 
     for (const row of mapped) {
       if (!row.phone.ok) {
@@ -371,6 +490,9 @@ imports.post("/commit", async (c) => {
             .values({ clientId, groupId, contactId: existing.id, addedBy: operatorUserId })
             .onConflictDoNothing({ target: [contactGroupMember.groupId, contactGroupMember.contactId] });
         }
+        // Labels are additive on an update, like every other field here: a
+        // re-import adds what the file says and never strips what it omits.
+        await applyLabels(existing.id, row.labels);
       } else {
         const [newContact] = await tx
           .insert(contact)
@@ -403,6 +525,7 @@ imports.post("/commit", async (c) => {
             .values({ clientId, groupId, contactId: newContact.id, addedBy: operatorUserId })
             .onConflictDoNothing({ target: [contactGroupMember.groupId, contactGroupMember.contactId] });
         }
+        await applyLabels(newContact.id, row.labels);
       }
     }
 
@@ -430,7 +553,7 @@ imports.post("/commit", async (c) => {
         .where(eq(contactGroup.id, groupId));
     }
 
-    return { importJobId: job.id, created, updated, errored, groupId };
+    return { importJobId: job.id, created, updated, errored, groupId, labelsCreated, labelsApplied };
   });
 
   return c.json(result, 201);

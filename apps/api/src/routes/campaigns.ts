@@ -460,66 +460,8 @@ campaigns.post("/:id/cancel", async (c) => {
   return c.json({ cancelled: true });
 });
 
-// ---------------------------------------------------------------------------
-// Groups (audience building blocks)
-// ---------------------------------------------------------------------------
-
-campaigns.get("/meta/groups", async (c) => {
-  const { clientId } = c.get("tenant");
-  return c.json(
-    await withTenant(clientId, async (tx) => {
-      // Counted with a join rather than a correlated subquery: embedding a
-      // column reference inside sql`` does not bind reliably here, and this
-      // is both clearer and index-friendly.
-      const rows = await tx
-        .select({
-          id: contactGroup.id,
-          name: contactGroup.name,
-          description: contactGroup.description,
-          memberCount: count(contactGroupMember.id),
-        })
-        .from(contactGroup)
-        .leftJoin(contactGroupMember, eq(contactGroupMember.groupId, contactGroup.id))
-        .groupBy(contactGroup.id, contactGroup.name, contactGroup.description, contactGroup.createdAt)
-        .orderBy(desc(contactGroup.createdAt));
-      return { groups: rows.map((r: any) => ({ ...r, memberCount: Number(r.memberCount) })) };
-    }),
-  );
-});
-
-campaigns.post("/meta/groups", async (c) => {
-  const { clientId } = c.get("tenant");
-  const body = await c.req.json<{ name: string; description?: string; contactIds?: string[] }>();
-  if (!body.name?.trim()) return c.json({ error: "name is required" }, 400);
-  const operatorUserId = await getOperatorUserId();
-
-  const row = await withTenant(clientId, async (tx) => {
-    const [group] = await tx
-      .insert(contactGroup)
-      .values({ clientId, name: body.name.trim(), description: body.description ?? null })
-      .onConflictDoNothing({ target: [contactGroup.clientId, contactGroup.name] })
-      .returning();
-    if (!group) return null;
-
-    if (body.contactIds?.length) {
-      await tx.insert(contactGroupMember).values(
-        body.contactIds.map((contactId) => ({
-          clientId,
-          groupId: group.id,
-          contactId,
-          addedBy: operatorUserId,
-        })),
-      );
-      await tx
-        .update(contactGroup)
-        .set({ cachedMemberCount: body.contactIds.length, lastRecountAt: new Date() })
-        .where(eq(contactGroup.id, group.id));
-    }
-    return group;
-  });
-
-  if (!row) return c.json({ error: "A group with that name already exists." }, 409);
-  return c.json({ group: row }, 201);
-});
+// Groups are a contact concept, not a campaign one: they are created and
+// maintained from the contacts screen. Campaigns only consume them, so the
+// CRUD lives in routes/contacts.ts under /workspace/contacts/meta/groups.
 
 export default campaigns;

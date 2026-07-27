@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import Link from "next/link";
 import { commitImportAction, previewImportAction, type PreviewResult } from "../app/contacts/actions";
 
@@ -24,16 +24,32 @@ const FIELD_LABELS: Record<string, string> = {
   state: "State",
   language: "Language",
   notes: "Notes",
+  labels: "Labels",
+};
+
+/** Only shown for fields whose behaviour is not obvious from the name. */
+const FIELD_HINTS: Record<string, string> = {
+  labels: "One label per cell, or several separated by commas. New labels are created automatically.",
 };
 
 export function ImportWizard() {
   const [preview, previewAction, previewPending] = useActionState(previewImportAction, undefined);
   const [commit, commitAction, commitPending] = useActionState(commitImportAction, undefined);
   const [mapping, setMapping] = useState<Record<string, string | null> | null>(null);
+  const [mappingChanged, setMappingChanged] = useState(false);
   const [fileName, setFileName] = useState("upload.csv");
 
   const currentMapping = mapping ?? (preview?.ok ? preview.mapping : null);
   const step = commit?.ok ? 3 : preview?.ok ? 2 : 1;
+
+  // A fresh preview is authoritative: drop the local override so the figures
+  // and the mapping on screen describe the same thing again.
+  useEffect(() => {
+    if (preview?.ok) {
+      setMapping(null);
+      setMappingChanged(false);
+    }
+  }, [preview]);
 
   if (commit?.ok) {
     return (
@@ -42,6 +58,10 @@ export function ImportWizard() {
           <strong>Import finished</strong>
           {commit.created} contact{commit.created === 1 ? "" : "s"} created, {commit.updated} updated
           {commit.errored > 0 ? `, ${commit.errored} row${commit.errored === 1 ? "" : "s"} rejected` : ""}.
+          {commit.labelsApplied > 0 &&
+            ` ${commit.labelsApplied} label${commit.labelsApplied === 1 ? "" : "s"} applied${
+              commit.labelsCreated > 0 ? ` (${commit.labelsCreated} newly created)` : ""
+            }.`}
         </div>
         <p className="muted small">
           You have 24 hours to undo this import. Undo removes only the contacts it created — never ones that already
@@ -175,9 +195,10 @@ export function ImportWizard() {
                     <label>{FIELD_LABELS[field]}</label>
                     <select
                       value={currentMapping[field] ?? ""}
-                      onChange={(e) =>
-                        setMapping({ ...currentMapping, [field]: e.target.value || null })
-                      }
+                      onChange={(e) => {
+                        setMapping({ ...currentMapping, [field]: e.target.value || null });
+                        setMappingChanged(true);
+                      }}
                     >
                       <option value="">— not imported —</option>
                       {preview.headers.map((h) => (
@@ -186,6 +207,7 @@ export function ImportWizard() {
                         </option>
                       ))}
                     </select>
+                    {FIELD_HINTS[field] && <div className="hint">{FIELD_HINTS[field]}</div>}
                   </div>
                 ))}
               </div>
@@ -196,8 +218,82 @@ export function ImportWizard() {
                   Nothing can be imported without it.
                 </div>
               )}
+
+              {/* The figures above were computed for the mapping the server
+                  guessed. Changing a column here makes them stale, so the
+                  operator is offered a re-check rather than left guessing. */}
+              {mappingChanged && (
+                <form action={previewAction}>
+                  <input type="hidden" name="csv" value={preview.csv} />
+                  <input type="hidden" name="mapping" value={JSON.stringify(currentMapping)} />
+                  <div className="notice notice-warn">
+                    <strong>You changed the mapping</strong>
+                    The counts and previews on this page still describe the previous mapping.
+                    <div className="mt-8">
+                      <button type="submit" className="btn btn-sm" disabled={previewPending}>
+                        {previewPending ? <span className="spinner" /> : "Re-check with this mapping"}
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              )}
             </div>
           </div>
+
+          {preview.labelDistinctCount > 0 && (
+            <div className="card mb-16">
+              <div className="card-head">
+                <h2>Labels in this file</h2>
+                <span className="sub">
+                  {preview.labelDistinctCount} distinct, {preview.labelNewCount} new
+                </span>
+              </div>
+
+              {preview.labelOverLimit ? (
+                <div className="card-pad">
+                  <div className="notice notice-danger mb-0">
+                    <strong>Too many distinct labels ({preview.labelDistinctCount})</strong>
+                    The limit is {preview.labelMaxDistinct}. This almost always means the label column is pointed at
+                    free text — a notes or address column — rather than a category. Correct the mapping above.
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {preview.labelTooLongCount > 0 && (
+                    <div className="card-pad">
+                      <div className="notice notice-danger mb-0">
+                        <strong>
+                          {preview.labelTooLongCount} value{preview.labelTooLongCount === 1 ? " is" : "s are"} too long
+                          to be a label
+                        </strong>
+                        The import will be refused. Check that the label column is the right one.
+                      </div>
+                    </div>
+                  )}
+                  <div className="card-pad">
+                    <div className="chips">
+                      {preview.labelPreview.map((l) => (
+                        <span key={l.name} className={`chip chip-tag${l.tooLong ? " chip-bad" : ""}`}>
+                          <span>{l.name}</span>
+                          <span className="faint">{l.contactCount}</span>
+                          {l.isNew && <span className="badge badge-info">new</span>}
+                        </span>
+                      ))}
+                      {preview.labelDistinctCount > preview.labelPreview.length && (
+                        <span className="muted small">
+                          + {preview.labelDistinctCount - preview.labelPreview.length} more
+                        </span>
+                      )}
+                    </div>
+                    <p className="hint mt-8 mb-0">
+                      Labels are additive: re-importing a list adds what the file says and never strips a label someone
+                      already carries.
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           {preview.invalidSamples.length > 0 && (
             <div className="card mb-16">
@@ -288,10 +384,25 @@ export function ImportWizard() {
                 </div>
               </div>
 
+              <div className="field">
+                <label htmlFor="labelNames">Label everyone (optional)</label>
+                <input id="labelNames" name="labelNames" type="text" placeholder="e.g. Acme Industries, 2026 intake" />
+                <div className="hint">
+                  Comma-separated. Applied to every contact in the file, on top of anything the mapped Labels column
+                  produces per row. Labels that do not exist yet are created.
+                </div>
+              </div>
+
               <button
                 type="submit"
                 className="btn btn-primary"
-                disabled={commitPending || !currentMapping.phoneNumber || preview.validCount === 0}
+                disabled={
+                  commitPending ||
+                  !currentMapping.phoneNumber ||
+                  preview.validCount === 0 ||
+                  preview.labelOverLimit ||
+                  preview.labelTooLongCount > 0
+                }
               >
                 {commitPending ? (
                   <>
