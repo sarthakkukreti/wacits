@@ -8,7 +8,7 @@ import {
   withSystemAccess,
   withTenant,
 } from "@wacits/db";
-import { encryptToken, maskToken, normalisePhone } from "@wacits/shared";
+import { DEFAULT_REGION, encryptToken, maskToken, normalisePhone } from "@wacits/shared";
 
 /**
  * Settings — connecting this workspace to Meta. PRD §7 (sender numbers) and
@@ -86,7 +86,11 @@ settings.post("/sender-numbers", async (c) => {
     if (!body[field]?.trim()) return c.json({ error: `${field} is required` }, 400);
   }
 
-  const phone = normalisePhone(body.displayPhoneNumber);
+  // This is the WABA's own sender number, not a contact — CT-8's
+  // mobile-only rule does not apply. Meta explicitly supports registering a
+  // landline as a Cloud API sender, verified by voice call instead of SMS,
+  // since it is an API endpoint rather than a handset anyone dials.
+  const phone = normalisePhone(body.displayPhoneNumber, DEFAULT_REGION, false);
   if (!phone.ok) return c.json({ error: `displayPhoneNumber is not valid: ${phone.message}` }, 400);
 
   // The portfolio and WABA are platform-level rows shared across clients,
