@@ -10,17 +10,11 @@
 # update PassengerAppRoot and PassengerRestartDir together.
 PassengerAppRoot /home/u310526385/domains/wacits.cyberlative.com/public_html
 PassengerAppType node
-PassengerNodejs /home/u310526385/domains/wacits.cyberlative.com/public_html/node-hostinger
+PassengerNodejs /opt/alt/alt-nodejs20/root/bin/node
 PassengerStartupFile server.js
 PassengerBaseURI /
 PassengerRestartDir /home/u310526385/domains/wacits.cyberlative.com/public_html/tmp
 SetEnv LSNODE_CONSOLE_LOG console.log
-
-# Hostinger's shared Node runtime exposes a large CPU count but enforces a
-# much smaller per-process thread limit. Without this cap Node aborts before
-# Passenger can start the app with `uv_thread_create` / WorkerThreadsTaskRunner.
-SetEnv NODE_OPTIONS "--v8-pool-size=1"
-SetEnv UV_THREADPOOL_SIZE 1
 
 RewriteEngine On
 
