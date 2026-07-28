@@ -11,30 +11,14 @@
 PassengerAppRoot /home/u310526385/domains/wacits.cyberlative.com/public_html
 PassengerAppType node
 PassengerNodejs /opt/alt/alt-nodejs22/root/bin/node
-PassengerStartupFile server.js
+PassengerStartupFile apps/web/.next/standalone/server.js
 PassengerBaseURI /
 PassengerRestartDir /home/u310526385/domains/wacits.cyberlative.com/public_html/tmp
 SetEnv LSNODE_CONSOLE_LOG console.log
-# Passenger starts Node before server.js is evaluated, so these limits must be
-# present in Apache's environment rather than assigned by application code.
-# `--v8-pool-size=0` means "auto-size" in Node, not zero workers; use one
-# worker because Hostinger's per-process thread limit is the startup blocker.
-SetEnv NODE_OPTIONS "--v8-pool-size=1"
-SetEnv UV_THREADPOOL_SIZE "1"
-
-RewriteEngine On
-
-# Serve /_next/static/* straight from disk instead of routing it through the
-# app. Requests for these reliably 404'd through Passenger for one specific
-# Next-internal chunk even though the file existed and a restart didn't help
-# (see prepare-standalone.sh, which is what writes apps/web/_next/static).
-# Rewriting to an existing file hands the request to Apache's own static
-# file handling — Passenger only steps in when the resolved path doesn't
-# exist on disk — so this sidesteps the app's own static handling entirely.
-RewriteRule ^_next/static/(.*)$ apps/web/_next/static/$1 [L]
 
 # The document root is the repo checkout, so refuse to serve anything that must
 # never be public even if Passenger falls through to static handling.
+RewriteEngine On
 RewriteRule ^\.builds - [F,L]
 RewriteRule ^\.git - [F,L]
 RewriteRule ^\.env - [F,L]
