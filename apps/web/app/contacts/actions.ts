@@ -303,7 +303,6 @@ export type PreviewResult =
       validCount: number;
       invalidCount: number;
       duplicateInFileCount: number;
-      multiNumberRowCount: number;
       willCreateCount: number;
       willUpdateCount: number;
       suppressedCount: number;

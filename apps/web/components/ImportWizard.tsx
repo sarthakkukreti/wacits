@@ -183,14 +183,6 @@ export function ImportWizard() {
             </div>
           )}
 
-          {preview.multiNumberRowCount > 0 && (
-            <div className="notice notice-info">
-              {preview.multiNumberRowCount} row{preview.multiNumberRowCount === 1 ? "" : "s"} listed more than one
-              phone number, separated by a comma or colon. Every number in a cell like that becomes its own contact,
-              all sharing that row's name, organisation and labels.
-            </div>
-          )}
-
           <div className="card mb-16">
             <div className="card-head">
               <h2>Column mapping</h2>
