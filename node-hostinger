@@ -1,0 +1,6 @@
+#!/bin/sh
+# Passenger launches this wrapper as if it were the Node binary. Hostinger's
+# shared runtime reports many CPUs but has a low per-process thread limit;
+# limiting V8 before Node starts prevents WorkerThreadsTaskRunner from aborting.
+export UV_THREADPOOL_SIZE=1
+exec /opt/alt/alt-nodejs22/root/bin/node --v8-pool-size=1 "$@"

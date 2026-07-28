@@ -10,7 +10,7 @@
 # update PassengerAppRoot and PassengerRestartDir together.
 PassengerAppRoot /home/u310526385/domains/wacits.cyberlative.com/public_html
 PassengerAppType node
-PassengerNodejs /opt/alt/alt-nodejs22/root/bin/node
+PassengerNodejs /home/u310526385/domains/wacits.cyberlative.com/public_html/node-hostinger
 PassengerStartupFile server.js
 PassengerBaseURI /
 PassengerRestartDir /home/u310526385/domains/wacits.cyberlative.com/public_html/tmp
