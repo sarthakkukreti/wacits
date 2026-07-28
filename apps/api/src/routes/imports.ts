@@ -54,6 +54,20 @@ function splitLabels(value: string | null | undefined): string[] {
 }
 
 /**
+ * One phone cell may list more than one number for the same person —
+ * "+91 98765 43210, +91 87654 32109" or "...:...". Each becomes its own
+ * contact. Split ONLY on comma and colon: a phone number itself routinely
+ * contains spaces, brackets and dashes, so those must stay untouched, and
+ * splitting on whitespace would tear a single formatted number in two.
+ */
+export function splitPhoneNumbers(value: string): string[] {
+  return value
+    .split(/[,:]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
  * The header names an operator's spreadsheet realistically uses. Matched
  * case-insensitively with punctuation stripped.
  *
@@ -170,10 +184,24 @@ type MappedRow = {
    *  entity, not a column. */
   values: Record<string, string | null>;
   labels: string[];
+  /** 1-based position and total count of phone numbers found in this row's
+   *  cell. Both are 1/1 for the ordinary case; only meaningful for error
+   *  messages when a cell listed more than one number. */
+  phoneIndex: number;
+  phoneCount: number;
 };
 
-function mapRows(rows: Record<string, string>[], mapping: Record<string, string | null>): MappedRow[] {
-  return rows.map((raw, i) => {
+/**
+ * One row in becomes one entry per phone number found in its phone cell —
+ * "Priya Sharma, +91 90000 11111, +91 90000 22222" produces two entries,
+ * both carrying Priya's name, organisation and labels. Everything
+ * downstream (dedup, create/update, undo tracking) operates on entries, not
+ * source rows, so a row that expands to two numbers is simply two contacts.
+ */
+export function mapRows(rows: Record<string, string>[], mapping: Record<string, string | null>): MappedRow[] {
+  const entries: MappedRow[] = [];
+
+  rows.forEach((raw, i) => {
     const pick = (field: string): string | null => {
       const col = mapping[field];
       if (!col) return null;
@@ -190,27 +218,42 @@ function mapRows(rows: Record<string, string>[], mapping: Record<string, string 
       lastName = lastName ?? split.lastName;
     }
 
-    const rawPhone = pick("phoneNumber") ?? "";
-
-    return {
-      rowNumber: i + 2, // +2: 1-indexed, plus the header row
-      raw,
-      phone: normalisePhone(rawPhone),
-      labels: splitLabels(pick("labels")),
-      values: {
-        firstName,
-        lastName,
-        email: pick("email"),
-        organization: pick("organization"),
-        designation: pick("designation"),
-        memberId: pick("memberId"),
-        city: pick("city"),
-        state: pick("state"),
-        language: pick("language"),
-        notes: pick("notes"),
-      },
+    const values = {
+      firstName,
+      lastName,
+      email: pick("email"),
+      organization: pick("organization"),
+      designation: pick("designation"),
+      memberId: pick("memberId"),
+      city: pick("city"),
+      state: pick("state"),
+      language: pick("language"),
+      notes: pick("notes"),
     };
+    const labels = splitLabels(pick("labels"));
+    const rowNumber = i + 2; // +2: 1-indexed, plus the header row
+
+    const rawCell = pick("phoneNumber") ?? "";
+    const split = splitPhoneNumbers(rawCell);
+    // An empty or single-number cell still produces exactly one entry, so
+    // it surfaces through the ordinary "no phone number provided" error
+    // rather than silently vanishing.
+    const rawPhones = split.length ? split : [rawCell];
+
+    rawPhones.forEach((rawPhone, idx) => {
+      entries.push({
+        rowNumber,
+        raw,
+        phone: normalisePhone(rawPhone),
+        values,
+        labels,
+        phoneIndex: idx + 1,
+        phoneCount: rawPhones.length,
+      });
+    });
   });
+
+  return entries;
 }
 
 /**
@@ -246,8 +289,14 @@ imports.post("/preview", async (c) => {
   const valid = mapped.filter((r) => r.phone.ok);
   const invalid = mapped.filter((r) => !r.phone.ok);
 
+  // How many source rows actually listed more than one number — reported
+  // as a row count, not an entry count, so "12 rows had multiple numbers"
+  // reads naturally rather than double-counting each split pair.
+  const multiNumberRowCount = new Set(mapped.filter((r) => r.phoneCount > 1).map((r) => r.rowNumber)).size;
+
   // Duplicates *within the file itself* — common when a list is assembled
-  // from several sources.
+  // from several sources, and now also whenever a row's own cell repeats a
+  // number ("+91987654321, +91987654321").
   const seen = new Set<string>();
   const duplicatesInFile: string[] = [];
   for (const r of valid) {
@@ -304,6 +353,7 @@ imports.post("/preview", async (c) => {
     validCount: valid.length,
     invalidCount: invalid.length,
     duplicateInFileCount: duplicatesInFile.length,
+    multiNumberRowCount,
     willCreateCount: uniquePhones.filter((p) => !existing.includes(p)).length,
     willUpdateCount: uniquePhones.filter((p) => existing.includes(p)).length,
     suppressedCount: suppressedRows.length,
@@ -318,7 +368,10 @@ imports.post("/preview", async (c) => {
     invalidSamples: invalid.slice(0, 25).map((r) => ({
       rowNumber: r.rowNumber,
       value: (r.phone as any).raw,
-      message: (r.phone as any).message,
+      // Naming which of a row's several numbers failed — otherwise a row
+      // that split into three numbers with one bad one just looks like an
+      // unexplained repeat of the same row number.
+      message: r.phoneCount > 1 ? `${(r.phone as any).message} (number ${r.phoneIndex} of ${r.phoneCount} in this row)` : (r.phone as any).message,
     })),
     sampleRows: valid.slice(0, 10).map((r) => ({
       rowNumber: r.rowNumber,
@@ -537,7 +590,11 @@ imports.post("/commit", async (c) => {
         createdCount: created,
         updatedCount: updated,
         erroredCount: errored,
-        skippedCount: rows.length - created - updated - errored,
+        // Against `mapped.length`, not `rows.length`: a row whose cell
+        // listed several numbers expands into that many entries, and this
+        // must count every one of them or a split row's in-file duplicate
+        // silently goes missing from the arithmetic.
+        skippedCount: mapped.length - created - updated - errored,
         finishedAt,
         undoAvailableUntil: new Date(finishedAt.getTime() + 24 * 60 * 60 * 1000),
       })
