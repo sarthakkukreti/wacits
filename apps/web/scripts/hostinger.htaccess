@@ -15,6 +15,12 @@ PassengerStartupFile server.js
 PassengerBaseURI /
 PassengerRestartDir /home/u310526385/domains/wacits.cyberlative.com/public_html/tmp
 SetEnv LSNODE_CONSOLE_LOG console.log
+# Passenger starts Node before server.js is evaluated, so these limits must be
+# present in Apache's environment rather than assigned by application code.
+# Hostinger's shared process limit otherwise prevents Node from creating its
+# V8 background workers and Passenger returns 503 before the app can boot.
+SetEnv NODE_OPTIONS "--v8-pool-size=0"
+SetEnv UV_THREADPOOL_SIZE "1"
 
 RewriteEngine On
 
