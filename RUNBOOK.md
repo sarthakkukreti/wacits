@@ -305,35 +305,15 @@ and Meta's live API):
   only APPROVED templates are offered to the campaign builder.
 - Access tokens encrypted at rest (AES-256-GCM) and redacted from any error
   text before it is shown or logged.
-- **Per-user login.** Email + password, gating the entire dashboard —
-  anyone without a valid session is redirected to `/login` before any page
-  or same-origin API route renders (`apps/web/middleware.ts` + a
-  per-render `requireSession()` check in the root layout for the narrower
-  "cookie present but expired" case). Hand-rolled, not the Better Auth
-  library §6 originally specified (`packages/shared/src/password.ts`:
-  scrypt + a `BETTER_AUTH_SECRET` pepper; `apps/api/src/routes/auth.ts`:
-  login/logout/session/change-password; session tokens stored hashed, a
-  Redis-backed login rate limiter that fails open) — reusing the schema
-  and env var Better Auth's absence had already reserved, since running
-  that library across this repo's split Hostinger/VPS hosts (the web app
-  has no direct database access) was judged higher integration risk than
-  it was worth for what is functionally plain email+password+session. One
-  `superAdmin` account is seeded idempotently at API boot
-  (`apps/api/src/lib/bootstrap-admin.ts`), the only way to get a user row
-  into production given there's no shell access to run a one-off script
-  there.
 
 **Still placeholder or absent:**
 
-- **Per-workspace role enforcement.** Login is binary — signed in or not —
-  not §6's four workspace roles or §21.2's `user_client_role`/
-  `user_client_permission` tables, which exist in the schema but are not
-  yet read anywhere. Every dashboard action is still attributed to the one
-  seeded operator account (`apps/api/src/lib/operator.ts`), not the actual
-  signed-in user; wiring that through the ~12 call sites that write is a
-  separate follow-up. No self-serve signup, invitations, or password reset
-  (no email-sending capability exists in this repo) — additional users are
-  a manual database insert for now.
+- **Per-user authentication.** Better Auth is specified (§6) but not wired.
+  The API is protected by a single shared secret (`API_SHARED_SECRET`) that
+  only the Next.js server holds, and every dashboard action is attributed to
+  one seeded operator account. This is a real access control, but it is not
+  per-user auth and gives no role separation — §6's four workspace roles are
+  modelled in the schema and not yet enforced.
 - Click-link token resolution (a genuine data-model gap, deliberately not
   guessed at), scheduled campaigns, MM Lite, media messages in the composer,
   quiet hours, and the frequency governor.

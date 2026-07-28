@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { logoutAction } from "../app/login/actions";
 
 const LINKS = [
   { section: "Messaging" },
@@ -17,20 +16,8 @@ const LINKS = [
   { href: "/settings", label: "Settings", icon: "⚙" },
 ] as const;
 
-export function Nav({
-  unreadCount,
-  superAdmin,
-  email,
-}: {
-  unreadCount?: number;
-  superAdmin?: boolean;
-  email?: string;
-}) {
+export function Nav({ unreadCount }: { unreadCount?: number }) {
   const pathname = usePathname();
-
-  // Belt-and-suspenders: layout.tsx already doesn't render Nav on /login,
-  // this just guards against Nav ever being rendered from somewhere else.
-  if (pathname === "/login") return null;
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -64,26 +51,7 @@ export function Nav({
         )}
       </nav>
 
-      <div className="sidebar-foot">
-        {email && (
-          <div className="sidebar-account">
-            <div className="sidebar-account-email" title={email}>
-              {email}
-            </div>
-            {superAdmin && (
-              <span className="badge badge-ok mt-8" style={{ display: "inline-flex" }}>
-                Super Admin
-              </span>
-            )}
-            <form action={logoutAction}>
-              <button type="submit" className="btn btn-sm w-auto mt-8">
-                Sign out
-              </button>
-            </form>
-          </div>
-        )}
-        <div className="faint small mt-8">Cyberlative IT Solutions</div>
-      </div>
+      <div className="sidebar-foot">Cyberlative IT Solutions</div>
     </aside>
   );
 }

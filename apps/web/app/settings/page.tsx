@@ -1,6 +1,5 @@
 import { apiSafe } from "../../lib/api";
 import { SenderNumberForm } from "../../components/SenderNumberForm";
-import { ChangePasswordForm } from "../../components/ChangePasswordForm";
 
 export const dynamic = "force-dynamic";
 
@@ -30,10 +29,8 @@ export default async function SettingsPage() {
 
       <div className="content">
         <div style={{ maxWidth: 780 }}>
-          <ChangePasswordForm />
-
           {!result.ok ? (
-            <div className="notice notice-danger mt-16">
+            <div className="notice notice-danger">
               <strong>Cannot load settings</strong>
               {result.error}
             </div>

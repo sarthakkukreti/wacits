@@ -12,17 +12,6 @@ import campaigns from "./routes/campaigns";
 import templates from "./routes/templates";
 import settings from "./routes/settings";
 import dashboard from "./routes/dashboard";
-import authRoutes from "./routes/auth";
-import { bootstrapSuperAdmin } from "./lib/bootstrap-admin";
-
-// Idempotent (mirrors getOperatorUserId()'s pattern) — a true no-op once the
-// row exists. Blocking module evaluation on this, so not even /health
-// responds until the super-admin account is guaranteed to exist, matches
-// this file's existing fail-loud-at-boot posture for required secrets
-// below. Deliberately does NOT depend on BETTER_AUTH_SECRET (see
-// lib/bootstrap-admin.ts) — a missing new env var must never take down an
-// already-working production API.
-await bootstrapSuperAdmin();
 
 const app = new Hono();
 
@@ -79,13 +68,6 @@ app.get("/clients", async (c) => {
   );
   return c.json({ clients: rows });
 });
-
-// End-user login/session — platform-level like /clients above (a user row
-// isn't scoped to one workspace). Mounted the same way every route file is:
-// AFTER requireApiCredential. The browser still never calls this API
-// directly — only the Next.js server does, now also forwarding
-// x-session-token so these routes can tell which logged-in user is asking.
-app.route("/auth", authRoutes);
 
 // Everything below /workspace requires a resolved tenant context and runs
 // through the RLS-backed query path (see packages/db/src/tenant.ts).

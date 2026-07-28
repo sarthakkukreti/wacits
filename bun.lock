@@ -12,12 +12,11 @@
       "name": "@wacits/api",
       "version": "0.1.0",
       "dependencies": {
-        "@wacits/db": "*",
-        "@wacits/queue": "*",
-        "@wacits/shared": "*",
+        "@wacits/db": "workspace:*",
+        "@wacits/queue": "workspace:*",
+        "@wacits/shared": "workspace:*",
         "drizzle-orm": ">=0.45.2",
         "hono": "^4.12.0",
-        "ioredis": "^5.4.1",
         "papaparse": "^5.5.4",
       },
       "devDependencies": {
@@ -78,7 +77,7 @@
       "name": "@wacits/db",
       "version": "0.1.0",
       "dependencies": {
-        "@wacits/shared": "*",
+        "@wacits/shared": "workspace:*",
         "drizzle-orm": ">=0.45.2",
         "postgres": "^3.4.5",
       },
