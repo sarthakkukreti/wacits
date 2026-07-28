@@ -11,7 +11,7 @@
 PassengerAppRoot /home/u310526385/domains/wacits.cyberlative.com/public_html
 PassengerAppType node
 PassengerNodejs /opt/alt/alt-nodejs22/root/bin/node
-PassengerStartupFile apps/web/.next/standalone/server.js
+PassengerStartupFile server.js
 PassengerBaseURI /
 PassengerRestartDir /home/u310526385/domains/wacits.cyberlative.com/public_html/tmp
 SetEnv LSNODE_CONSOLE_LOG console.log
