@@ -8,7 +8,6 @@ import {
   consentRecord,
   contact,
   conversation,
-  errorCodeClassification,
   message,
   senderNumber,
   suppressionEntry,
@@ -24,6 +23,7 @@ import {
   toWhatsAppId,
   type TemplateComponent,
 } from "@wacits/shared";
+import { classifyError } from "./lib/error-classification";
 
 /**
  * PRD §13 Sending engine — drains the send queue, calls Meta, records the
@@ -41,39 +41,6 @@ import {
  *  - 131050 (user opted out) writes to the global suppression list
  *    immediately — a legal obligation, not a preference.
  */
-
-/** Resolves how to treat a Meta error, from the database rather than code. */
-async function classifyError(
-  tx: any,
-  apiSurface: string,
-  code: string,
-): Promise<{ errorClass: string; countsToward131026: boolean; title: string }> {
-  // Exact (surface, code) wins over the '*' wildcard row — DM-27's
-  // precedence, since the same code means different things per endpoint.
-  const rows = await tx
-    .select()
-    .from(errorCodeClassification)
-    .where(
-      and(
-        eq(errorCodeClassification.code, code),
-        sql`${errorCodeClassification.apiSurface} IN (${apiSurface}, '*')`,
-      ),
-    );
-
-  const match = rows.find((r: any) => r.apiSurface === apiSurface) ?? rows.find((r: any) => r.apiSurface === "*");
-
-  if (!match) {
-    // An unknown code is treated as terminal rather than retried forever.
-    console.warn(`[send-worker] no classification for (${apiSurface}, ${code}) — treating as TERMINAL.`);
-    return { errorClass: "TERMINAL", countsToward131026: false, title: "Unclassified error" };
-  }
-
-  return {
-    errorClass: match.errorClass,
-    countsToward131026: match.countsToward131026Evidence === "true",
-    title: match.title,
-  };
-}
 
 /**
  * Builds the template `components` array from the campaign's parameter

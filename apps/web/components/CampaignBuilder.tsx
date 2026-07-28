@@ -37,15 +37,19 @@ export function CampaignBuilder({
   templates,
   groups,
   totalContacts,
+  uncontactedCount,
 }: {
   templates: Template[];
   groups: Group[];
   totalContacts: number;
+  uncontactedCount: number;
 }) {
   const [state, formAction, pending] = useActionState(createCampaignAction, undefined);
 
   const [templateId, setTemplateId] = useState(templates[0]?.id ?? "");
-  const [audienceMode, setAudienceMode] = useState<"all" | "groups">(groups.length ? "groups" : "all");
+  const [audienceMode, setAudienceMode] = useState<"all" | "groups" | "uncontacted">(
+    groups.length ? "groups" : "all",
+  );
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
   const [excludeUndeliverable, setExcludeUndeliverable] = useState(true);
   const [params, setParams] = useState<Record<string, string>>({});
@@ -62,7 +66,9 @@ export function CampaignBuilder({
     const spec =
       audienceMode === "groups"
         ? { groupIds: selectedGroups, excludeUndeliverable }
-        : { allContacts: true, excludeUndeliverable };
+        : audienceMode === "uncontacted"
+          ? { allContacts: true, onlyUncontacted: true, excludeUndeliverable }
+          : { allContacts: true, excludeUndeliverable };
 
     if (audienceMode === "groups" && selectedGroups.length === 0) {
       setPreview(null);
@@ -200,8 +206,22 @@ export function CampaignBuilder({
             <button type="button" className={audienceMode === "all" ? "active" : ""} onClick={() => setAudienceMode("all")}>
               Everyone ({totalContacts})
             </button>
+            <button
+              type="button"
+              className={audienceMode === "uncontacted" ? "active" : ""}
+              onClick={() => setAudienceMode("uncontacted")}
+            >
+              Not yet contacted ({uncontactedCount})
+            </button>
           </div>
           <input type="hidden" name="audienceMode" value={audienceMode} />
+
+          {audienceMode === "uncontacted" && (
+            <div className="notice notice-info mb-0">
+              People with no delivery evidence either way yet — never messaged, or a message to them never resolved.
+              A good list to open new outreach with.
+            </div>
+          )}
 
           {audienceMode === "groups" &&
             (groups.length === 0 ? (

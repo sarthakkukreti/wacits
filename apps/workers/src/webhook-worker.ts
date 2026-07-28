@@ -18,6 +18,7 @@ import {
 } from "@wacits/db";
 import { createHash } from "node:crypto";
 import { fromWhatsAppId } from "@wacits/shared";
+import { classifyError } from "./lib/error-classification";
 
 /**
  * PRD §4.2 (b)/(c), §14 — interprets the raw webhook payloads the receiver
@@ -386,6 +387,44 @@ async function processStatuses(tx: any, value: any, rawPayload: unknown) {
         .update(contact)
         .set({ deliverabilityState: "deliverable", deliverabilityChangedAt: new Date(), strike131026Count: 0 })
         .where(and(eq(contact.id, msgRow.contactId), sql`${contact.deliverabilityState} <> 'deliverable'`));
+    }
+
+    // send-worker.ts applies DM-22's strike-to-suspect rule when Meta
+    // rejects the send synchronously, but a message just as often gets
+    // accepted and THEN fails asynchronously — this status event is that
+    // path, and until now it recorded failedErrorCode on the message
+    // (above) without ever touching the contact. Same rule, same
+    // classification table, so the two paths cannot disagree about what a
+    // given code means: accumulate a strike, escalate to `suspect` only at
+    // the threshold, never straight to `invalid` (that stays reserved for
+    // syntactic validation per DM-22 canon).
+    if (statusName === "failed" && errorCode) {
+      const classification = await classifyError(tx, "/messages", errorCode);
+      if (classification.countsToward131026) {
+        const [contactRow] = await tx
+          .select({
+            strike131026Count: contact.strike131026Count,
+            deliverabilityState: contact.deliverabilityState,
+            deliverabilityChangedAt: contact.deliverabilityChangedAt,
+          })
+          .from(contact)
+          .where(eq(contact.id, msgRow.contactId))
+          .limit(1);
+
+        if (contactRow) {
+          const nextCount = (contactRow.strike131026Count ?? 0) + 1;
+          const reachedThreshold = nextCount >= 3;
+          await tx
+            .update(contact)
+            .set({
+              strike131026Count: nextCount,
+              deliverabilityState: reachedThreshold ? "suspect" : contactRow.deliverabilityState,
+              deliverabilityChangedAt: reachedThreshold ? new Date() : contactRow.deliverabilityChangedAt,
+              updatedAt: new Date(),
+            })
+            .where(eq(contact.id, msgRow.contactId));
+        }
+      }
     }
   }
 }

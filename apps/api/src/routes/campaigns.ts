@@ -49,6 +49,12 @@ export type AudienceSpec = {
    *  by previous send evidence (DM-22). Defaults to true — sending to
    *  known-bad numbers damages quality rating for no benefit. */
   excludeUndeliverable?: boolean;
+  /** Restrict to contacts with no delivery evidence either way yet
+   *  (deliverability_state = 'unknown') — people who have never had a
+   *  message reach them. Composes with groupIds/tagIds/allContacts rather
+   *  than replacing them, so "not yet contacted, within this group" works
+   *  the same way excludeUndeliverable does. */
+  onlyUncontacted?: boolean;
 };
 
 async function resolveAudience(tx: any, spec: AudienceSpec): Promise<{ id: string; phoneNumber: string }[]> {
@@ -56,6 +62,10 @@ async function resolveAudience(tx: any, spec: AudienceSpec): Promise<{ id: strin
 
   if (spec.excludeUndeliverable !== false) {
     filters.push(sql`${contact.deliverabilityState} NOT IN ('invalid', 'suspect')` as any);
+  }
+
+  if (spec.onlyUncontacted) {
+    filters.push(eq(contact.deliverabilityState, "unknown"));
   }
 
   const idSources: any[] = [];

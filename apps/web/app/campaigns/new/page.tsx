@@ -10,7 +10,7 @@ export default async function NewCampaignPage() {
       templates: { id: string; name: string; language: string; status: string; latestVersionId: string | null; components: any }[];
     }>("/workspace/templates?approved=true"),
     apiSafe<{ groups: { id: string; name: string; memberCount: number }[] }>("/workspace/contacts/meta/groups"),
-    apiSafe<{ total: number }>("/workspace/contacts/stats"),
+    apiSafe<{ total: number; unknown: number }>("/workspace/contacts/stats"),
   ]);
 
   const approved = templates.ok ? templates.data.templates.filter((t) => t.latestVersionId) : [];
@@ -47,6 +47,7 @@ export default async function NewCampaignPage() {
               templates={approved}
               groups={groups.ok ? groups.data.groups : []}
               totalContacts={stats.ok ? stats.data.total : 0}
+              uncontactedCount={stats.ok ? stats.data.unknown : 0}
             />
           )}
         </div>

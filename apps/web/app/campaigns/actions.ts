@@ -9,6 +9,7 @@ export type AudienceSpec = {
   groupIds?: string[];
   tagIds?: string[];
   excludeUndeliverable?: boolean;
+  onlyUncontacted?: boolean;
 };
 
 export type PreviewResult =
@@ -45,7 +46,11 @@ export async function createCampaignAction(
   if (!templateVersionId) return { ok: false, error: "Choose an approved template." };
 
   const audience: AudienceSpec =
-    audienceMode === "groups" ? { groupIds, excludeUndeliverable } : { allContacts: true, excludeUndeliverable };
+    audienceMode === "groups"
+      ? { groupIds, excludeUndeliverable }
+      : audienceMode === "uncontacted"
+        ? { allContacts: true, onlyUncontacted: true, excludeUndeliverable }
+        : { allContacts: true, excludeUndeliverable };
 
   if (audienceMode === "groups" && groupIds.length === 0) {
     return { ok: false, error: "Select at least one group, or choose “everyone”." };
