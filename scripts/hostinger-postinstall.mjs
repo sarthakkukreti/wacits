@@ -74,6 +74,20 @@ try {
   // placed by hand. Do not fail the deploy over this.
 }
 
+// Git-connected deploys can materialize tracked files without their executable
+// bit on the live document root. PassengerNodejs points at this wrapper so it
+// can receive Node startup flags before V8 initializes; restore its mode here.
+try {
+  const { chmodSync, existsSync } = await import("node:fs");
+  if (existsSync("node-hostinger")) {
+    chmodSync("node-hostinger", 0o755);
+    console.log("[postinstall] Enabled executable permission on node-hostinger.");
+  }
+} catch (error) {
+  console.error("[postinstall] Could not enable node-hostinger:", error.message);
+  process.exit(1);
+}
+
 // Force Passenger to restart. It does not notice a new deploy on its own —
 // touching a file under PassengerRestartDir is the documented signal, and
 // skipping this step is exactly how a stale worker process from the PREVIOUS
