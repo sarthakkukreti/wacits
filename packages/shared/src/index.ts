@@ -4,3 +4,4 @@ export * from "./error-codes";
 export * from "./phone";
 export * from "./meta";
 export * from "./crypto";
+export * from "./password";

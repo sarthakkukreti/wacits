@@ -56,14 +56,19 @@ type RequestOptions = {
   body?: unknown;
   /** Workspace routes need the tenant header; platform routes do not. */
   tenant?: boolean;
+  /** The end-user's session token (from the wacits_session cookie), sent as
+   *  x-session-token — a separate header from Authorization, which stays
+   *  the service-to-service secret. Only /auth/* routes need this. */
+  sessionToken?: string;
 };
 
 export async function api<T = any>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const { method = "GET", body, tenant = true } = opts;
+  const { method = "GET", body, tenant = true, sessionToken } = opts;
 
   const headers: Record<string, string> = { ...authHeaders() };
   if (body) headers["Content-Type"] = "application/json";
   if (tenant) headers["x-client-id"] = await resolveClientId();
+  if (sessionToken) headers["x-session-token"] = sessionToken;
 
   const res = await fetch(`${API_URL}${path}`, {
     method,
