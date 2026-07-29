@@ -12,6 +12,7 @@ import campaigns from "./routes/campaigns";
 import templates from "./routes/templates";
 import settings from "./routes/settings";
 import dashboard from "./routes/dashboard";
+import messageLog from "./routes/messages";
 import authRoutes from "./routes/auth";
 import { bootstrapSuperAdmin } from "./lib/bootstrap-admin";
 
@@ -101,6 +102,7 @@ workspace.route("/campaigns", campaigns);
 workspace.route("/templates", templates);
 workspace.route("/settings", settings);
 workspace.route("/dashboard", dashboard);
+workspace.route("/messages", messageLog);
 
 app.route("/workspace", workspace);
 

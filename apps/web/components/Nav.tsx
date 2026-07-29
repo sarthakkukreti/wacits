@@ -9,6 +9,7 @@ const LINKS = [
   { href: "/", label: "Dashboard", icon: "▪" },
   { href: "/inbox", label: "Inbox", icon: "✉" },
   { href: "/campaigns", label: "Campaigns", icon: "◈" },
+  { href: "/messages", label: "Message log", icon: "⇄" },
   { section: "Audience" },
   { href: "/contacts", label: "Contacts", icon: "☰" },
   { href: "/contacts/import", label: "Import CSV", icon: "↑" },

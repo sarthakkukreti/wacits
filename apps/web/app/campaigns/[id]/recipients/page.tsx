@@ -51,6 +51,11 @@ export default async function RecipientsPage({
       <div className="topbar">
         <h1>Recipients</h1>
         <div className="topbar-actions">
+          {/* The message log explains what each error code means and is
+              where a failed send can actually be retried. */}
+          <Link href={`/messages?campaignId=${id}&status=failed`} className="btn">
+            Failures in message log
+          </Link>
           <Link href={`/campaigns/${id}`} className="btn">
             Back to campaign
           </Link>

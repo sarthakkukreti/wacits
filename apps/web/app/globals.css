@@ -579,3 +579,26 @@ input:focus, select:focus, textarea:focus {
 
 /* A label value that is too long to be a label — flagged in the import preview. */
 .chip-bad { border-color: var(--danger); color: var(--danger); background: var(--danger-bg); }
+
+/* ---------- Message log ---------- */
+
+/* Status filter chips reuse .chip; this is the selected state. */
+.chip-active { background: var(--brand); border-color: var(--brand); color: #fff; }
+.chip-active .faint { color: rgba(255, 255, 255, 0.75); }
+
+/* A failure title that expands its explanation — a button for keyboard
+   and screen-reader reachability, styled as inline text rather than a
+   control, since it sits inside a table cell. */
+.btn-link-plain {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.btn-link-plain:hover { color: var(--brand-light); }
