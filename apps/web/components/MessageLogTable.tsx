@@ -23,6 +23,12 @@ export type LogRow = {
   skipReason: string | null;
   failure: { errorClass: string; title: string; explanation: string | null } | null;
   resendEligible: boolean;
+  /** `new_attempt` mints attempt_key + 1; `requeue` re-enqueues the same
+   *  attempt for a send that has not gone out yet. */
+  resendMode: "new_attempt" | "requeue" | null;
+  /** Why this particular resend might be a bad idea — shown before it runs
+   *  rather than discovered afterwards. */
+  resendWarning: string | null;
   resendBlockedReason: string | null;
   occurredAt: string | null;
 };
@@ -58,7 +64,9 @@ export function MessageLogTable({
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState<null | { kind: "selected" | "all"; count: number }>(null);
+  const [confirming, setConfirming] = useState<
+    null | { kind: "selected" | "all"; count: number; warnings: { text: string; count: number }[] }
+  >(null);
   const [result, setResult] = useState<ResendResult | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -83,6 +91,19 @@ export function MessageLogTable({
       return next;
     });
 
+  /** Distinct warnings across a selection, with how many rows each covers,
+   *  so the dialog says "12× already delivered" rather than repeating it. */
+  const warningsFor = (ids: string[]) => {
+    const counts = new Map<string, number>();
+    for (const id of ids) {
+      const w = rows.find((r) => r.rowId === id)?.resendWarning;
+      if (w) counts.set(w, (counts.get(w) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([text, count]) => ({ text, count }))
+      .sort((a, b) => b.count - a.count);
+  };
+
   const run = (fn: () => Promise<ResendResult>) => {
     startTransition(async () => {
       const res = await fn();
@@ -104,6 +125,8 @@ export function MessageLogTable({
             <>
               <strong>
                 {formatNumber(result.queued)} message{result.queued === 1 ? "" : "s"} queued for resend
+                {result.outcomes.some((o) => o.requeued) &&
+                  ` (${formatNumber(result.outcomes.filter((o) => o.requeued).length)} re-queued as the existing attempt)`}
                 {result.refused > 0 ? `, ${formatNumber(result.refused)} refused` : ""}
               </strong>
               {result.refused > 0 && (
@@ -150,10 +173,28 @@ export function MessageLogTable({
                 <strong>These are real WhatsApp messages</strong>
                 Each delivered message is billed by Meta. Recipients will receive the template again.
               </div>
+
+              {/* Every selectable status can be resent, so the specific
+                  risks vary per row — surfaced here rather than left to be
+                  discovered from the result. */}
+              {confirming.warnings.length > 0 && (
+                <div className="notice notice-danger">
+                  <strong>Worth checking first</strong>
+                  <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                    {confirming.warnings.map((w) => (
+                      <li key={w.text} className="small">
+                        {w.count > 1 && <strong>{formatNumber(w.count)}× </strong>}
+                        {w.text}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <p className="muted small">
-                This creates a new attempt in the same campaign; the original failed record is kept so both attempts
-                stay visible in the report. Anything ineligible — opted out, terminally failed, or already retrying —
-                is excluded from the {formatNumber(confirming.count)} above and will not be sent.
+                Each resend creates a new attempt in the same campaign; the original record is kept so every attempt
+                stays visible in the report. A send that has not gone out yet is re-queued as the same attempt instead,
+                so it cannot double-send.
               </p>
               <div className="flex gap-6">
                 <button
@@ -188,7 +229,13 @@ export function MessageLogTable({
                 type="button"
                 className="btn btn-primary btn-sm"
                 disabled={pending}
-                onClick={() => setConfirming({ kind: "selected", count: selectedEligible.length })}
+                onClick={() =>
+                  setConfirming({
+                    kind: "selected",
+                    count: selectedEligible.length,
+                    warnings: warningsFor(selectedEligible),
+                  })
+                }
               >
                 Resend selected
               </button>
@@ -204,10 +251,24 @@ export function MessageLogTable({
               type="button"
               className="btn btn-sm"
               disabled={pending}
-              onClick={() => setConfirming({ kind: "all", count: campaignEligibleCount ?? 0 })}
-              title="Resends every eligible failure in this campaign, not just this page"
+              onClick={() =>
+                setConfirming({
+                  kind: "all",
+                  count: campaignEligibleCount ?? 0,
+                  // Campaign-wide, so the warnings visible on this page are
+                  // only a sample — said plainly rather than implied.
+                  warnings: [
+                    ...warningsFor(eligibleRows.map((r) => r.rowId)),
+                    {
+                      text: "This covers the whole campaign, not just this page — rows not shown here may carry other risks.",
+                      count: 1,
+                    },
+                  ],
+                })
+              }
+              title="Resends every resendable row in this campaign, not just this page"
             >
-              Resend all {formatNumber(campaignEligibleCount ?? 0)} eligible in campaign
+              Resend all {formatNumber(campaignEligibleCount ?? 0)} in campaign
             </button>
           )}
         </div>
@@ -245,7 +306,7 @@ export function MessageLogTable({
                       checked={selected.has(r.rowId)}
                       onChange={() => toggle(r.rowId)}
                       disabled={!r.resendEligible}
-                      title={r.resendEligible ? undefined : r.resendBlockedReason ?? undefined}
+                      title={(r.resendEligible ? r.resendWarning : r.resendBlockedReason) ?? undefined}
                       aria-label={`Select message to ${name}`}
                     />
                   </td>
@@ -289,6 +350,9 @@ export function MessageLogTable({
                         </div>
                         {isOpen && r.failure.explanation && (
                           <div className="notice notice-info small mt-8 mb-0">{r.failure.explanation}</div>
+                        )}
+                        {isOpen && r.resendWarning && (
+                          <div className="notice notice-warn small mt-8 mb-0">{r.resendWarning}</div>
                         )}
                         {isOpen && !r.resendEligible && r.resendBlockedReason && (
                           <div className="faint small mt-8">Cannot resend: {r.resendBlockedReason}</div>

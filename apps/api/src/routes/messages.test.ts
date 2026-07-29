@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildClassificationLookup, isResendEligible, selectResendableIds } from "./messages";
+import { buildClassificationLookup, resendVerdict, selectResendableIds } from "./messages";
 
 /**
  * These two functions encode PRD rules rather than mechanics, which is
@@ -7,44 +7,53 @@ import { buildClassificationLookup, isResendEligible, selectResendableIds } from
  * legitimate retry or bills the client for a resend that cannot succeed.
  */
 
-describe("isResendEligible — §13 error-class catalogue", () => {
-  test("CONDITIONAL is retryable once the operator clears the condition", () => {
-    expect(isResendEligible("failed", "CONDITIONAL").eligible).toBe(true);
+describe("resendVerdict — every completed status is resendable", () => {
+  test("a failure of any error class can be resent", () => {
+    for (const cls of ["CONDITIONAL", "OPERATIONAL_ALERT", "RETRY_BACKOFF", "TERMINAL", "PROBABLE_INVALID_CONTACT", null]) {
+      expect(resendVerdict("failed", cls, false).mode).toBe("new_attempt");
+    }
   });
 
-  test("OPERATIONAL_ALERT is retryable once the underlying cause is cleared", () => {
-    expect(isResendEligible("failed", "OPERATIONAL_ALERT").eligible).toBe(true);
+  test("already-delivered outcomes can be resent, but warn that it sends and bills again", () => {
+    for (const state of ["sent", "delivered", "read"]) {
+      const v = resendVerdict(state, null, false);
+      expect(v.mode).toBe("new_attempt");
+      if (v.mode !== "blocked") expect(v.warning).toContain("second time");
+    }
   });
 
-  test("RETRY_BACKOFF is retryable — it only reaches failed once automatic retries are exhausted", () => {
-    expect(isResendEligible("failed", "RETRY_BACKOFF").eligible).toBe(true);
+  test("a skipped row can be resent, but warns that suppression is re-checked at send time", () => {
+    const v = resendVerdict("skipped", null, false);
+    expect(v.mode).toBe("new_attempt");
+    if (v.mode !== "blocked") expect(v.warning).toContain("suppression");
   });
 
-  test("TERMINAL is never retryable — it would fail identically", () => {
-    const verdict = isResendEligible("failed", "TERMINAL");
-    expect(verdict.eligible).toBe(false);
-    expect(verdict.reason).toBeTruthy();
+  test("risky classes still carry a warning even though they are allowed", () => {
+    for (const cls of ["TERMINAL", "PROBABLE_INVALID_CONTACT", "CONDITIONAL", "OPERATIONAL_ALERT"]) {
+      const v = resendVerdict("failed", cls, false);
+      if (v.mode !== "blocked") expect(v.warning).toBeTruthy();
+    }
   });
 
-  test("PROBABLE_INVALID_CONTACT is not offered while a strike is open (DM-22)", () => {
-    const verdict = isResendEligible("failed", "PROBABLE_INVALID_CONTACT");
-    expect(verdict.eligible).toBe(false);
-    expect(verdict.reason).toContain("strike");
+  test("a transient failure is the one case with no warning — it is the most likely to now succeed", () => {
+    const v = resendVerdict("failed", "RETRY_BACKOFF", false);
+    if (v.mode !== "blocked") expect(v.warning).toBeNull();
   });
 
-  test("an unclassified code is treated as terminal rather than retryable", () => {
-    expect(isResendEligible("failed", null).eligible).toBe(false);
-    expect(isResendEligible("failed", "SOMETHING_NEW").eligible).toBe(false);
+  test("a send that has not gone out yet is re-queued, never duplicated", () => {
+    for (const state of ["pending", "queued"]) {
+      expect(resendVerdict(state, null, false).mode).toBe("requeue");
+    }
   });
 
-  test("a skipped recipient is never retryable — suppression is a duty", () => {
-    const verdict = isResendEligible("skipped", "CONDITIONAL");
-    expect(verdict.eligible).toBe(false);
+  test("a send awaiting its delivery receipt is refused — resending would duplicate it (AR-16)", () => {
+    const v = resendVerdict("accepted", null, false);
+    expect(v.mode).toBe("blocked");
   });
 
-  test("only a failed row can be resent, never one already on its way", () => {
-    for (const state of ["pending", "queued", "accepted", "sent", "delivered", "read"]) {
-      expect(isResendEligible(state, "CONDITIONAL").eligible).toBe(false);
+  test("an in-flight later attempt blocks every status — the one guard that always wins", () => {
+    for (const state of ["failed", "delivered", "read", "skipped", "pending", "sent"]) {
+      expect(resendVerdict(state, "RETRY_BACKOFF", true).mode).toBe("blocked");
     }
   });
 });
@@ -75,11 +84,12 @@ describe("buildClassificationLookup — DM-27 (api_surface, code) precedence", (
     expect(classify("/messages", "190")!.errorClass).toBe("OPERATIONAL_ALERT");
   });
 
-  test("an unknown code is reported as terminal, never as retryable", () => {
+  test("an unknown code is reported as terminal and carries a warning", () => {
     const classify = buildClassificationLookup(rows);
     const result = classify("/messages", "999999")!;
     expect(result.errorClass).toBe("TERMINAL");
-    expect(isResendEligible("failed", result.errorClass).eligible).toBe(false);
+    const v = resendVerdict("failed", result.errorClass, false);
+    if (v.mode !== "blocked") expect(v.warning).toBeTruthy();
   });
 
   test("no code means no failure to explain", () => {
@@ -95,18 +105,27 @@ describe("selectResendableIds — what a bulk resend would actually send", () =>
 
   const base = { contactId: "c1", templateVersionId: "t1" };
 
-  test("picks eligible failures and skips terminal ones", () => {
+  test("includes every completed outcome, terminal failures and delivered alike", () => {
     const ids = selectResendableIds(
       [
         { ...base, id: "a", contactId: "c1", attemptKey: 1, state: "failed", errorCode: "131047" },
         { ...base, id: "b", contactId: "c2", attemptKey: 1, state: "failed", errorCode: "131050" },
+        { ...base, id: "c", contactId: "c3", attemptKey: 1, state: "delivered", errorCode: null },
       ],
       classify,
     );
-    expect(ids).toEqual(["a"]);
+    expect(ids).toEqual(["a", "b", "c"]);
   });
 
-  test("excludes a failure whose retry is already in flight — the count must not promise a send that will be refused", () => {
+  test("excludes a row awaiting its delivery receipt", () => {
+    const ids = selectResendableIds(
+      [{ ...base, id: "a", contactId: "c1", attemptKey: 1, state: "accepted", errorCode: null }],
+      classify,
+    );
+    expect(ids).toEqual([]);
+  });
+
+  test("a failure shadowed by an in-flight retry is excluded, while the in-flight row itself can still be re-queued", () => {
     const ids = selectResendableIds(
       [
         { ...base, id: "a", attemptKey: 1, state: "failed", errorCode: "131047" },
@@ -114,7 +133,9 @@ describe("selectResendableIds — what a bulk resend would actually send", () =>
       ],
       classify,
     );
-    expect(ids).toEqual([]);
+    // `a` must not mint a third attempt behind the live one; `a2` has not
+    // gone out yet, so re-queueing it is safe and nudges a stuck send.
+    expect(ids).toEqual(["a2"]);
   });
 
   test("a failed retry is itself resendable again once it has also failed", () => {

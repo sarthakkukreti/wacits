@@ -8,6 +8,9 @@ export type ResendOutcome = {
   queued: boolean;
   reason?: string;
   attemptKey?: number;
+  /** The existing attempt was re-queued rather than a new one created —
+   *  what happens for a send that had not gone out yet. */
+  requeued?: boolean;
 };
 
 export type ResendResult =
