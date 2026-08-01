@@ -33,9 +33,9 @@ export default async function ThreadPage({
 
   const [thread, templates] = await Promise.all([
     apiSafe<ThreadResponse>(`/workspace/inbox/conversations/${id}`),
-    apiSafe<{ templates: { id: string; name: string; language: string; status: string }[] }>(
-      "/workspace/templates?approved=true",
-    ),
+    apiSafe<{
+      templates: { id: string; name: string; language: string; status: string; components: any }[];
+    }>("/workspace/templates?approved=true"),
   ]);
 
   if (!thread.ok) {

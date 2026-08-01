@@ -1,13 +1,18 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useMemo, useState } from "react";
 import { startChatAction } from "../app/inbox/actions";
+import { readTemplateBody } from "../lib/template-params";
 
-type Template = { id: string; name: string; language: string; status: string };
+type Template = { id: string; name: string; language: string; status: string; components: any };
 
 export function NewChatForm({ templates }: { templates: Template[] }) {
   const [state, formAction, pending] = useActionState(startChatAction, undefined);
   const [mode, setMode] = useState<"template" | "text">(templates.length ? "template" : "text");
+  const [templateName, setTemplateName] = useState(templates[0]?.name ?? "");
+
+  const template = templates.find((t) => t.name === templateName);
+  const { body, placeholders } = useMemo(() => readTemplateBody(template?.components), [template]);
 
   return (
     <form action={formAction}>
@@ -70,29 +75,53 @@ export function NewChatForm({ templates }: { templates: Template[] }) {
             Templates page.
           </div>
         ) : (
-          <div className="field">
-            <label htmlFor="templateName">Template</label>
-            <select
-              id="templateName"
-              name="templateName"
-              onChange={(e) => {
-                const chosen = templates.find((t) => t.name === e.target.value);
-                const langInput = document.getElementById("templateLanguage") as HTMLInputElement | null;
-                if (langInput && chosen) langInput.value = chosen.language;
-              }}
-              defaultValue={templates[0]?.name}
-            >
-              {templates.map((t) => (
-                <option key={t.id} value={t.name}>
-                  {t.name} ({t.language})
-                </option>
-              ))}
-            </select>
-            <input type="hidden" id="templateLanguage" name="templateLanguage" defaultValue={templates[0]?.language} />
-            <div className="hint">
-              Templates with variables are not filled in from this screen — use a campaign for personalised sends.
+          <>
+            <div className="field">
+              <label htmlFor="templateName">Template</label>
+              <select
+                id="templateName"
+                name="templateName"
+                value={templateName}
+                onChange={(e) => setTemplateName(e.target.value)}
+              >
+                {templates.map((t) => (
+                  <option key={t.id} value={t.name}>
+                    {t.name} ({t.language})
+                  </option>
+                ))}
+              </select>
+              <input type="hidden" name="templateLanguage" value={template?.language ?? "en"} />
             </div>
-          </div>
+
+            {body && (
+              <div className="card card-pad mb-8" style={{ background: "var(--bubble-out)", border: "none" }}>
+                <div className="small muted mb-8">Preview</div>
+                <div style={{ whiteSpace: "pre-wrap", fontSize: 13.5 }}>{body}</div>
+              </div>
+            )}
+
+            {placeholders.length > 0 && (
+              <div className="field">
+                <div className="hint mb-8">
+                  This template has {placeholders.length} variable{placeholders.length === 1 ? "" : "s"}. Type the text
+                  each one should be replaced with — WhatsApp rejects the message if any is left blank.
+                </div>
+                {placeholders.map((index) => (
+                  <div key={index} className="field">
+                    <label htmlFor={`param_${index}`}>Variable {`{{${index}}}`}</label>
+                    <input
+                      id={`param_${index}`}
+                      name={`param_${index}`}
+                      type="text"
+                      placeholder="e.g. 30 September 2026"
+                      autoComplete="off"
+                      required
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )
       ) : (
         <div className="field">

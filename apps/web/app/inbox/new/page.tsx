@@ -4,9 +4,9 @@ import { NewChatForm } from "../../../components/NewChatForm";
 export const dynamic = "force-dynamic";
 
 export default async function NewChatPage() {
-  const templates = await apiSafe<{ templates: { id: string; name: string; language: string; status: string }[] }>(
-    "/workspace/templates?approved=true",
-  );
+  const templates = await apiSafe<{
+    templates: { id: string; name: string; language: string; status: string; components: any }[];
+  }>("/workspace/templates?approved=true");
 
   return (
     <div className="thread">

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { api, ApiError } from "../../lib/api";
+import type { TemplateComponent } from "../../lib/template-params";
 
 /**
  * Server actions for the inbox. These run on the Next.js server, so the API
@@ -43,11 +44,14 @@ export async function sendTemplateAction(
   conversationId: string,
   templateName: string,
   languageCode: string,
+  /** Positional values for a template body that has {{n}} placeholders.
+   *  Omitted for a template with none — see lib/template-params.ts. */
+  components?: TemplateComponent[],
 ): Promise<SendResult> {
   try {
     await api(`/workspace/inbox/conversations/${conversationId}/messages`, {
       method: "POST",
-      body: { template: { name: templateName, languageCode } },
+      body: { template: { name: templateName, languageCode, components } },
     });
     revalidatePath(`/inbox/${conversationId}`);
     return { ok: true };
@@ -98,6 +102,25 @@ export async function startChatAction(
 
   if (!phoneNumber) return { ok: false, error: "Enter a phone number with country code." };
 
+  // Rebuild the body parameters in placeholder order. Meta matches them
+  // positionally, so sorting numerically is what makes {{2}} land second —
+  // FormData order is the DOM's, which is not a guarantee worth relying on.
+  const indices = [...formData.keys()]
+    .filter((k) => /^param_\d+$/.test(k))
+    .map((k) => k.replace("param_", ""))
+    .sort((a, b) => Number(a) - Number(b));
+
+  const parameters = indices.map((index) => ({
+    type: "text" as const,
+    text: String(formData.get(`param_${index}`) ?? "").trim(),
+  }));
+
+  if (parameters.some((p) => !p.text)) {
+    return { ok: false, error: "Fill in every template variable — WhatsApp rejects a message with a blank one." };
+  }
+
+  const components: TemplateComponent[] = parameters.length ? [{ type: "body", parameters }] : [];
+
   let conversationId: string;
   try {
     const result = await api<{ conversationId: string }>("/workspace/inbox/start", {
@@ -107,7 +130,9 @@ export async function startChatAction(
         firstName,
         lastName,
         text: templateName ? undefined : text,
-        template: templateName ? { name: templateName, languageCode: templateLanguage || "en" } : undefined,
+        template: templateName
+          ? { name: templateName, languageCode: templateLanguage || "en", components }
+          : undefined,
       },
     });
     conversationId = result.conversationId;

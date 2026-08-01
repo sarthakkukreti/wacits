@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useOptimistic, useRef, useState, useTransition } from "react";
 import { formatDay, formatTime, formatWindowRemaining } from "../lib/format";
 import { sendMessageAction, sendTemplateAction } from "../app/inbox/actions";
+import { buildTemplateComponents, missingParams, readTemplateBody } from "../lib/template-params";
 
 export type ChatMessage = {
   id: string;
@@ -17,11 +18,13 @@ export type ChatMessage = {
 
 export type ServiceWindow = { open: boolean; expiresAt: string | null };
 
+type Template = { id: string; name: string; language: string; status: string; components: any };
+
 type Props = {
   conversationId: string;
   initialMessages: ChatMessage[];
   initialWindow: ServiceWindow;
-  templates: { id: string; name: string; language: string; status: string }[];
+  templates: Template[];
   blockedNotice?: string;
 };
 
@@ -60,6 +63,12 @@ export function Chat({ conversationId, initialMessages, initialWindow, templates
   const [text, setText] = useState("");
   const [pending, startTransition] = useTransition();
   const [showTemplates, setShowTemplates] = useState(false);
+
+  // A template whose body has {{n}} placeholders cannot be sent on one
+  // click — Meta rejects a parameter count that does not match the approved
+  // body (132000), so the agent is asked to fill them in first.
+  const [filling, setFilling] = useState<{ name: string; language: string; placeholders: string[] } | null>(null);
+  const [params, setParams] = useState<Record<string, string>>({});
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const shouldStickToBottom = useRef(true);
@@ -133,11 +142,25 @@ export function Chat({ conversationId, initialMessages, initialWindow, templates
     });
   };
 
-  const sendTemplate = (name: string, language: string) => {
+  /** Entry point from every template button: send straight away when the
+   *  template takes no variables, otherwise open the fill-in panel. */
+  const chooseTemplate = (t: Template) => {
     setError(null);
     setShowTemplates(false);
+    const { placeholders } = readTemplateBody(t.components);
+    if (placeholders.length) {
+      setParams({});
+      setFilling({ name: t.name, language: t.language, placeholders });
+      return;
+    }
+    sendTemplate(t.name, t.language, []);
+  };
+
+  const sendTemplate = (name: string, language: string, components: ReturnType<typeof buildTemplateComponents>) => {
+    setError(null);
+    setFilling(null);
     startTransition(async () => {
-      const result = await sendTemplateAction(conversationId, name, language);
+      const result = await sendTemplateAction(conversationId, name, language, components);
       if (!result.ok) setError(result.error);
       else {
         const res = await fetch(`/api/conversations/${conversationId}`, { cache: "no-store" });
@@ -201,6 +224,46 @@ export function Chat({ conversationId, initialMessages, initialWindow, templates
           </div>
         )}
 
+        {filling && (
+          <div className="card card-pad mb-8">
+            <div className="flex-between mb-8">
+              <strong>
+                {filling.name} <span className="faint">({filling.language})</span>
+              </strong>
+              <button type="button" className="btn btn-sm" onClick={() => setFilling(null)} disabled={pending}>
+                Cancel
+              </button>
+            </div>
+            <div className="small muted mb-8">
+              Fill in {filling.placeholders.length} variable{filling.placeholders.length === 1 ? "" : "s"} before
+              sending.
+            </div>
+            {filling.placeholders.map((index) => (
+              <div key={index} className="field">
+                <label htmlFor={`tmpl_param_${index}`}>Variable {`{{${index}}}`}</label>
+                <input
+                  id={`tmpl_param_${index}`}
+                  type="text"
+                  value={params[index] ?? ""}
+                  placeholder="e.g. 30 September 2026"
+                  autoComplete="off"
+                  onChange={(e) => setParams((prev) => ({ ...prev, [index]: e.target.value }))}
+                />
+              </div>
+            ))}
+            <button
+              type="button"
+              className="btn btn-primary mt-8"
+              disabled={pending || missingParams(filling.placeholders, params).length > 0}
+              onClick={() =>
+                sendTemplate(filling.name, filling.language, buildTemplateComponents(filling.placeholders, params))
+              }
+            >
+              {pending ? <span className="spinner" /> : "Send template"}
+            </button>
+          </div>
+        )}
+
         {window.open ? (
           <>
             <div className="flex-between mb-8">
@@ -222,7 +285,7 @@ export function Chat({ conversationId, initialMessages, initialWindow, templates
                       type="button"
                       className="btn btn-sm"
                       disabled={pending}
-                      onClick={() => sendTemplate(t.name, t.language)}
+                      onClick={() => chooseTemplate(t)}
                     >
                       {t.name} <span className="faint">({t.language})</span>
                     </button>
@@ -272,7 +335,7 @@ export function Chat({ conversationId, initialMessages, initialWindow, templates
                     type="button"
                     className="btn"
                     disabled={pending}
-                    onClick={() => sendTemplate(t.name, t.language)}
+                    onClick={() => chooseTemplate(t)}
                   >
                     {pending ? <span className="spinner" /> : `Send "${t.name}"`}
                   </button>

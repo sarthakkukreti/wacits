@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useMemo, useState } from "react";
 import { createCampaignAction, previewAudienceAction, type PreviewResult } from "../app/campaigns/actions";
+import { readTemplateBody } from "../lib/template-params";
 
 type Template = {
   id: string;
@@ -13,17 +14,6 @@ type Template = {
 };
 
 type Group = { id: string; name: string; memberCount: number };
-
-/** Pulls the body text and its {{n}} placeholders out of a template's
- *  component array, so the builder can show a real preview and ask for the
- *  right number of variables instead of guessing. */
-function readTemplateBody(components: any): { body: string; placeholders: string[] } {
-  const list = Array.isArray(components) ? components : [];
-  const bodyComponent = list.find((c: any) => (c?.type ?? "").toUpperCase() === "BODY");
-  const body: string = bodyComponent?.text ?? "";
-  const placeholders = [...body.matchAll(/\{\{(\d+)\}\}/g)].map((m) => m[1]).filter((x): x is string => !!x);
-  return { body, placeholders: [...new Set(placeholders)].sort((a, b) => Number(a) - Number(b)) };
-}
 
 const FIELD_TOKENS = [
   { token: "{{firstName}}", label: "First name" },
