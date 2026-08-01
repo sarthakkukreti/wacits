@@ -19,6 +19,32 @@ const STATUSES = [
   { value: "received", label: "Received" },
 ];
 
+/** The five canonical error classes (§13/Appendix A) — what a failure's
+ *  reason resolves to, independent of the specific Meta error code. */
+const ERROR_CLASSES = [
+  { value: "", label: "Any error class" },
+  { value: "RETRY_BACKOFF", label: "Retry / backoff" },
+  { value: "TERMINAL", label: "Terminal" },
+  { value: "CONDITIONAL", label: "Conditional" },
+  { value: "PROBABLE_INVALID_CONTACT", label: "Probable invalid contact" },
+  { value: "OPERATIONAL_ALERT", label: "Operational alert" },
+];
+
+/** The skip reasons the sending path actually writes — see send-worker.ts
+ *  and the campaign cancel endpoint. Not an enum, so this list is the only
+ *  place it is documented. */
+const SKIP_REASONS = [
+  { value: "", label: "Any skip reason" },
+  { value: "campaign_paused", label: "Campaign paused" },
+  { value: "campaign_cancelled", label: "Campaign cancelled" },
+  { value: "suppressed", label: "Suppressed / opted out" },
+];
+
+/** Filter keys other than `status` and `page` — kept in one place so every
+ *  spot that forwards or preserves query params (the filter form, the
+ *  status chips, pagination) stays in sync automatically. */
+const FILTER_KEYS = ["direction", "campaignId", "q", "errorClass", "errorCode", "skipReason"] as const;
+
 export default async function MessagesPage({
   searchParams,
 }: {
@@ -28,19 +54,22 @@ export default async function MessagesPage({
     campaignId?: string;
     q?: string;
     page?: string;
+    errorClass?: string;
+    errorCode?: string;
+    skipReason?: string;
   }>;
 }) {
   const sp = await searchParams;
   const page = Number(sp.page ?? 1);
 
   const query = new URLSearchParams({ page: String(page), pageSize: "50" });
-  for (const key of ["status", "direction", "campaignId", "q"] as const) {
+  for (const key of ["status", ...FILTER_KEYS] as const) {
     if (sp[key]) query.set(key, sp[key]!);
   }
   const statsQuery = new URLSearchParams(query);
   statsQuery.delete("status");
 
-  const [log, stats, campaigns] = await Promise.all([
+  const [log, stats, campaigns, errorCodes] = await Promise.all([
     apiSafe<{ messages: LogRow[]; total: number; page: number; pageSize: number }>(
       `/workspace/messages?${query.toString()}`,
     ),
@@ -48,10 +77,11 @@ export default async function MessagesPage({
       `/workspace/messages/stats?${statsQuery.toString()}`,
     ),
     apiSafe<{ campaigns: { id: string; name: string }[] }>("/workspace/campaigns"),
+    apiSafe<{ codes: { code: string; title: string; errorClass: string }[] }>("/workspace/messages/error-codes"),
   ]);
 
   const byStatus = stats.ok ? stats.data.byStatus : {};
-  const filtered = Boolean(sp.status || sp.direction || sp.campaignId || sp.q);
+  const filtered = Boolean(sp.status || FILTER_KEYS.some((key) => sp[key]));
 
   return (
     <>
@@ -87,6 +117,29 @@ export default async function MessagesPage({
                 <option value="outbound">Outbound</option>
                 <option value="inbound">Inbound</option>
               </select>
+              <select name="errorClass" defaultValue={sp.errorClass ?? ""} style={{ width: 190 }}>
+                {ERROR_CLASSES.map((ec) => (
+                  <option key={ec.value} value={ec.value}>
+                    {ec.label}
+                  </option>
+                ))}
+              </select>
+              <select name="errorCode" defaultValue={sp.errorCode ?? ""} style={{ width: 220 }}>
+                <option value="">Any error code</option>
+                {errorCodes.ok &&
+                  errorCodes.data.codes.map((ec) => (
+                    <option key={ec.code} value={ec.code}>
+                      {ec.code} — {ec.title}
+                    </option>
+                  ))}
+              </select>
+              <select name="skipReason" defaultValue={sp.skipReason ?? ""} style={{ width: 190 }}>
+                {SKIP_REASONS.map((sr) => (
+                  <option key={sr.value} value={sr.value}>
+                    {sr.label}
+                  </option>
+                ))}
+              </select>
               <button type="submit" className="btn">
                 Filter
               </button>
@@ -104,7 +157,7 @@ export default async function MessagesPage({
               {STATUSES.map((s) => {
                 const active = (sp.status ?? "") === s.value;
                 const next = new URLSearchParams();
-                for (const key of ["direction", "campaignId", "q"] as const) {
+                for (const key of FILTER_KEYS) {
                   if (sp[key]) next.set(key, sp[key]!);
                 }
                 if (s.value) next.set("status", s.value);

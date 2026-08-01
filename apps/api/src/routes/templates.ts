@@ -32,6 +32,16 @@ templates.get("/", async (c) => {
       const filters = [];
       if (onlyApproved) filters.push(eq(template.currentStatus, "APPROVED"));
 
+      const latestVersion = tx
+        .selectDistinctOn([templateVersion.templateId], {
+          templateId: templateVersion.templateId,
+          id: templateVersion.id,
+          components: templateVersion.components,
+        })
+        .from(templateVersion)
+        .orderBy(templateVersion.templateId, desc(templateVersion.versionNumber))
+        .as("latest_version");
+
       const rows = await tx
         .select({
           id: template.id,
@@ -42,14 +52,11 @@ templates.get("/", async (c) => {
           qualityScore: template.currentQualityScore,
           metaTemplateId: template.metaTemplateId,
           updatedAt: template.updatedAt,
-          latestVersionId: templateVersion.id,
-          components: templateVersion.components,
+          latestVersionId: latestVersion.id,
+          components: latestVersion.components,
         })
         .from(template)
-        .leftJoin(
-          templateVersion,
-          and(eq(templateVersion.templateId, template.id), eq(templateVersion.versionNumber, 1)),
-        )
+        .leftJoin(latestVersion, eq(latestVersion.templateId, template.id))
         .where(filters.length ? and(...filters) : undefined)
         .orderBy(asc(template.name));
 
@@ -134,6 +141,27 @@ templates.post("/sync", async (c) => {
           })
           .where(eq(template.id, existing.id));
         updated++;
+
+        const [latest] = await tx
+          .select({ versionNumber: templateVersion.versionNumber, components: templateVersion.components })
+          .from(templateVersion)
+          .where(eq(templateVersion.templateId, existing.id))
+          .orderBy(desc(templateVersion.versionNumber))
+          .limit(1);
+
+        const remoteComponents = t.components ?? [];
+        if (!latest || JSON.stringify(latest.components) !== JSON.stringify(remoteComponents)) {
+          await tx.insert(templateVersion).values({
+            clientId,
+            templateId: existing.id,
+            versionNumber: (latest?.versionNumber ?? 0) + 1,
+            components: remoteComponents,
+            parameterFormat: "positional",
+            language: t.language,
+            reviewOutcome: t.status,
+            approvedAt: t.status === "APPROVED" ? new Date() : null,
+          });
+        }
       } else {
         const [row] = await tx
           .insert(template)
