@@ -5,3 +5,4 @@ export * from "./phone";
 export * from "./meta";
 export * from "./crypto";
 export * from "./password";
+export * from "./logger";

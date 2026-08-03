@@ -1,4 +1,5 @@
-import { integer, jsonb, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { index, integer, jsonb, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
 import { createdAt, id, tsCol, updatedAt, utcNow } from "./columns.helpers";
 import {
   consentCategory,
@@ -52,7 +53,20 @@ export const contact = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [unique("contact_client_phone_unique").on(t.clientId, t.phoneNumber)],
+  (t) => [
+    unique("contact_client_phone_unique").on(t.clientId, t.phoneNumber),
+    // PRD §21.3 contact-list filtering by type/city and fuzzy name search.
+    // Not yet exercised by the current UI filters (only q/deliverability/
+    // tag/group/errorCode are wired today), but part of the PRD's named
+    // contact-search index set (DM-14) — added now since the columns exist.
+    index("contact_client_contact_type_idx").on(t.clientId, t.contactTypeId),
+    index("contact_client_city_idx").on(t.clientId, t.city),
+    index("contact_custom_attributes_gin_idx").using("gin", t.customAttributes),
+    index("contact_name_trgm_idx").using(
+      "gin",
+      sql`(coalesce(${t.firstName}, '') || ' ' || coalesce(${t.lastName}, '')) gin_trgm_ops`,
+    ),
+  ],
 );
 
 // PRD §21.3 contact_group — a named STATIC list. No `type` column, no

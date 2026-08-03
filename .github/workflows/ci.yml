@@ -1,0 +1,77 @@
+name: CI
+
+# PRD CL-11 / §25 Phase-1 exit criterion: "a second workspace cannot see
+# the first one's data, proven by tests that run in CI." This workflow is
+# what makes that literally true — before this file, the isolation tests
+# (packages/db/src/tenant.test.ts, apps/api/src/tenant-isolation.test.ts)
+# existed but nothing ran them automatically on a push or PR.
+#
+# Mark this workflow as a required status check in the repo's branch
+# protection settings — that's a GitHub setting, not something a workflow
+# file can enforce on its own.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      # Pinned to the same patch versions as docker-compose.yml so CI
+      # exercises the same Postgres/Valkey the app actually runs against.
+      postgres:
+        image: postgres:16.6
+        env:
+          POSTGRES_USER: wacits
+          POSTGRES_PASSWORD: wacits_ci_password
+          POSTGRES_DB: wacits
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      valkey:
+        image: valkey/valkey:8.0.2
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://wacits:wacits_ci_password@localhost:5432/wacits
+      REDIS_URL: redis://localhost:6379
+      # Not real secrets — this is an ephemeral CI database, thrown away at
+      # the end of the job. Long enough to satisfy each module's own
+      # length checks (see middleware/auth.ts, TS-8).
+      API_SHARED_SECRET: ci-shared-secret-not-for-real-use-0000000000
+      BETTER_AUTH_SECRET: ci-better-auth-secret-not-for-real-use-000000
+      TOKEN_ENCRYPTION_KEY: ci-token-encryption-key-not-for-real-use-00
+      CORS_ORIGIN: http://localhost:3000
+      WORKSPACE_SLUG: cits-internal
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Apply migrations
+        run: bun run db:migrate
+
+      - name: Apply row-level security setup
+        run: bun run db:security-setup
+
+      - name: Run tests
+        run: bun test

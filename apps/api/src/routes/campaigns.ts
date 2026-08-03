@@ -15,8 +15,9 @@ import {
   withTenant,
 } from "@wacits/db";
 import { sendQueue } from "@wacits/queue";
-import { getOperatorUserId } from "../lib/operator";
 import { resolveSender } from "../lib/sending";
+import { requirePermission } from "../middleware/permission";
+import { writeAuditLog } from "../lib/audit";
 
 /**
  * PRD §12 Campaigns — a planned bulk send to a resolved audience.
@@ -106,7 +107,7 @@ async function resolveAudience(tx: any, spec: AudienceSpec): Promise<{ id: strin
 
 /** Preview an audience without creating anything — the count an operator
  *  sees before they commit to a send. */
-campaigns.post("/audience/preview", async (c) => {
+campaigns.post("/audience/preview", requirePermission("create_campaign"), async (c) => {
   const { clientId } = c.get("tenant");
   const spec = await c.req.json<AudienceSpec>();
 
@@ -261,8 +262,8 @@ campaigns.get("/:id/recipients", async (c) => {
  * separation is what makes the "you are about to message 4,860 people"
  * confirmation meaningful.
  */
-campaigns.post("/", async (c) => {
-  const { clientId } = c.get("tenant");
+campaigns.post("/", requirePermission("create_campaign"), async (c) => {
+  const { clientId, userId } = c.get("tenant");
   const body = await c.req.json<{
     name: string;
     templateVersionId: string;
@@ -275,8 +276,6 @@ campaigns.post("/", async (c) => {
 
   if (!body.name?.trim()) return c.json({ error: "name is required" }, 400);
   if (!body.templateVersionId) return c.json({ error: "templateVersionId is required" }, 400);
-
-  const operatorUserId = await getOperatorUserId();
 
   const result = await withTenant(clientId, async (tx) => {
     const [version] = await tx
@@ -327,7 +326,7 @@ campaigns.post("/", async (c) => {
         scheduledAt: body.scheduledAt ? new Date(body.scheduledAt) : null,
         state: "draft",
         stateChangedAt: new Date(),
-        createdBy: operatorUserId,
+        createdBy: userId,
       })
       .returning();
 
@@ -379,8 +378,8 @@ campaigns.post("/", async (c) => {
  * Releases a draft campaign to the send queue. This is the point of no
  * return, so it is a separate, explicit call.
  */
-campaigns.post("/:id/launch", async (c) => {
-  const { clientId } = c.get("tenant");
+campaigns.post("/:id/launch", requirePermission("launch_campaign"), async (c) => {
+  const { clientId, userId } = c.get("tenant");
   const id = c.req.param("id");
 
   const result = await withTenant(clientId, async (tx) => {
@@ -400,6 +399,18 @@ campaigns.post("/:id/launch", async (c) => {
       .set({ state: "running", stateChangedAt: new Date() })
       .where(eq(campaign.id, id));
 
+    // Highest-risk single action in the product (AU-1) — audited with the
+    // recipient count and template version so the log explains blast radius,
+    // not just that a launch happened.
+    await writeAuditLog(tx, {
+      clientId,
+      actorUserId: userId,
+      action: "campaign_launched",
+      entityType: "campaign",
+      entityId: id,
+      beforeAfterSummary: { recipientCount: pending.length, templateVersionId: row.templateVersionId },
+    });
+
     return { campaignId: id, pending };
   });
 
@@ -410,7 +421,7 @@ campaigns.post("/:id/launch", async (c) => {
   await sendQueue.addBulk(
     result.pending.map((r: any) => ({
       name: "send",
-      data: { campaignRecipientId: r.id, campaignId: id, attemptKey: r.attemptKey },
+      data: { campaignRecipientId: r.id, campaignId: id, attemptKey: r.attemptKey, correlationId: c.get("requestId") },
       opts: {
         // Idempotent enqueue (AR-13): re-launching a campaign can never
         // double-send, because the same (recipient, attempt) maps to the
@@ -428,7 +439,7 @@ campaigns.post("/:id/launch", async (c) => {
   return c.json({ launched: true, queued: result.pending.length });
 });
 
-campaigns.post("/:id/pause", async (c) => {
+campaigns.post("/:id/pause", requirePermission("pause_resume_cancel_campaign"), async (c) => {
   const { clientId } = c.get("tenant");
   const body = await c.req.json<{ reason?: string }>().catch(() => ({}) as any);
 
@@ -445,7 +456,7 @@ campaigns.post("/:id/pause", async (c) => {
   return c.json(row);
 });
 
-campaigns.post("/:id/cancel", async (c) => {
+campaigns.post("/:id/cancel", requirePermission("pause_resume_cancel_campaign"), async (c) => {
   const { clientId } = c.get("tenant");
   const id = c.req.param("id");
 

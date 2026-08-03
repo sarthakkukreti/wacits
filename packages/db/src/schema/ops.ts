@@ -1,4 +1,5 @@
-import { integer, jsonb, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { index, integer, jsonb, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
 import { createdAt, id, tsCol, utcNow } from "./columns.helpers";
 import { auditActorType, errorClass, notificationSeverity } from "./enums";
 import { client } from "./platform";
@@ -18,26 +19,40 @@ export const auditLog = pgTable("audit_log", {
   beforeAfterSummary: jsonb("before_after_summary"), // secrets redacted
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
+  // AU-2: a correlation identifier shared by every log line, queue job and
+  // outbound API call tied to the same originating request.
+  correlationId: text("correlation_id"),
   occurredAt: utcNow("occurred_at"),
 });
 
 // PRD §21.5 webhook_event — raw, durable capture of every inbound webhook,
 // written BEFORE any parsing (AR-8/DM-9). Not client-scoped at write time;
 // the resolved client id is stored once known, purely for debugging.
-export const webhookEvent = pgTable("webhook_event", {
-  id: id(),
-  clientId: uuid("client_id").references(() => client.id),
-  receivedAt: utcNow("received_at"),
-  signatureVerified: text("signature_verified").notNull(),
-  objectType: text("object_type"),
-  wabaId: text("waba_id"),
-  field: text("field"),
-  rawBody: text("raw_body").notNull(), // exactly as received
-  bodyHash: text("body_hash").notNull(),
-  processingState: text("processing_state").notNull().default("pending"),
-  processingAttempts: integer("processing_attempts").notNull().default(0),
-  lastError: text("last_error"),
-});
+export const webhookEvent = pgTable(
+  "webhook_event",
+  {
+    id: id(),
+    clientId: uuid("client_id").references(() => client.id),
+    receivedAt: utcNow("received_at"),
+    signatureVerified: text("signature_verified").notNull(),
+    objectType: text("object_type"),
+    wabaId: text("waba_id"),
+    field: text("field"),
+    rawBody: text("raw_body").notNull(), // exactly as received
+    bodyHash: text("body_hash").notNull(),
+    processingState: text("processing_state").notNull().default("pending"),
+    processingAttempts: integer("processing_attempts").notNull().default(0),
+    lastError: text("last_error"),
+  },
+  (t) => [
+    // Serves the webhook worker's / scheduler's lookup of stuck or
+    // unprocessed events (apps/workers/src/webhook-worker.ts checks
+    // processingState; feeds the unresolved-send sweep).
+    index("webhook_event_unprocessed_idx")
+      .on(t.receivedAt)
+      .where(sql`${t.processingState} != 'processed'`),
+  ],
+);
 
 export const notification = pgTable("notification", {
   id: id(),

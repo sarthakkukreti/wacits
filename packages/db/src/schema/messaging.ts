@@ -1,4 +1,5 @@
-import { integer, jsonb, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { index, integer, jsonb, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
 import { createdAt, id, tsCol, utcNow } from "./columns.helpers";
 import { conversationState, messageDirection, messageStatus } from "./enums";
 import { client, senderNumber } from "./platform";
@@ -25,7 +26,17 @@ export const conversation = pgTable(
     unreadCount: integer("unread_count").notNull().default(0),
     createdAt: createdAt(),
   },
-  (t) => [unique("conversation_number_contact_unique").on(t.senderNumberId, t.contactId)],
+  (t) => [
+    unique("conversation_number_contact_unique").on(t.senderNumberId, t.contactId),
+    // Serves the inbox conversation list's default view (apps/api/src/routes/inbox.ts:76-81):
+    // WHERE state = 'open' ORDER BY greatest(coalesce(last_inbound_at,'epoch'), coalesce(last_outbound_at,'epoch')) DESC.
+    index("conversation_open_by_activity_idx")
+      .on(
+        t.clientId,
+        sql`greatest(coalesce(${t.lastInboundAt}, 'epoch'), coalesce(${t.lastOutboundAt}, 'epoch')) desc`,
+      )
+      .where(sql`${t.state} = 'open'`),
+  ],
 );
 
 export const conversationNote = pgTable("conversation_note", {
@@ -59,29 +70,37 @@ export const customerServiceWindow = pgTable(
 // PRD §21.4 message — a single WhatsApp message in either direction.
 // current_status is derived by monotonic rank (DM-7), never written
 // directly by a webhook handler.
-export const message = pgTable("message", {
-  id: id(),
-  clientId: uuid("client_id").notNull().references(() => client.id, { onDelete: "cascade" }),
-  senderNumberId: uuid("sender_number_id").notNull().references(() => senderNumber.id),
-  contactId: uuid("contact_id").notNull().references(() => contact.id),
-  direction: messageDirection("direction").notNull(),
-  wamid: text("wamid").unique(),
-  sendId: text("send_id"),
-  campaignRecipientId: uuid("campaign_recipient_id").references(() => campaignRecipient.id),
-  conversationId: uuid("conversation_id").notNull().references(() => conversation.id),
-  type: text("type").notNull(), // text | template | image | ...
-  contentOrTemplateRef: jsonb("content_or_template_ref"),
-  templateVersionId: uuid("template_version_id").references(() => templateVersion.id),
-  mediaReference: text("media_reference"),
-  currentStatus: messageStatus("current_status"),
-  currentStatusRank: integer("current_status_rank").notNull().default(0),
-  pricingCategory: text("pricing_category"),
-  billable: text("billable").notNull().default("unknown"),
-  sentAt: tsCol("sent_at"),
-  failedErrorCode: text("failed_error_code"),
-  failedApiSurface: text("failed_api_surface"),
-  createdAt: createdAt(),
-});
+export const message = pgTable(
+  "message",
+  {
+    id: id(),
+    clientId: uuid("client_id").notNull().references(() => client.id, { onDelete: "cascade" }),
+    senderNumberId: uuid("sender_number_id").notNull().references(() => senderNumber.id),
+    contactId: uuid("contact_id").notNull().references(() => contact.id),
+    direction: messageDirection("direction").notNull(),
+    wamid: text("wamid").unique(),
+    sendId: text("send_id"),
+    campaignRecipientId: uuid("campaign_recipient_id").references(() => campaignRecipient.id),
+    conversationId: uuid("conversation_id").notNull().references(() => conversation.id),
+    type: text("type").notNull(), // text | template | image | ...
+    contentOrTemplateRef: jsonb("content_or_template_ref"),
+    templateVersionId: uuid("template_version_id").references(() => templateVersion.id),
+    mediaReference: text("media_reference"),
+    currentStatus: messageStatus("current_status"),
+    currentStatusRank: integer("current_status_rank").notNull().default(0),
+    pricingCategory: text("pricing_category"),
+    billable: text("billable").notNull().default("unknown"),
+    sentAt: tsCol("sent_at"),
+    failedErrorCode: text("failed_error_code"),
+    failedApiSurface: text("failed_api_surface"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    // Serves the per-conversation thread query (apps/api/src/routes/inbox.ts:131-136):
+    // WHERE conversation_id = ? ORDER BY created_at ASC LIMIT 500.
+    index("message_conversation_created_idx").on(t.clientId, t.conversationId, t.createdAt),
+  ],
+);
 
 // PRD §21.4 message_status_event — append-only. DM-11/AR-11: unique on
 // (wamid, status) ONLY — provider timestamp is stored but deliberately
@@ -102,5 +121,9 @@ export const messageStatusEvent = pgTable(
     rawPayload: jsonb("raw_payload").notNull(),
     payloadHash: text("payload_hash").notNull(),
   },
-  (t) => [unique("message_status_event_wamid_status_unique").on(t.wamid, t.status)],
+  (t) => [
+    unique("message_status_event_wamid_status_unique").on(t.wamid, t.status),
+    // Serves rendering a message's full delivery-event history in order (PRD §21.4).
+    index("message_status_event_message_provider_ts_idx").on(t.messageId, t.providerTimestamp),
+  ],
 );

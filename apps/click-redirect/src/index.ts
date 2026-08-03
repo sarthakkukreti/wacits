@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { db } from "@wacits/db";
+import { createLogger } from "@wacits/shared";
 import { sql } from "drizzle-orm";
 
 /**
@@ -18,6 +19,21 @@ import { sql } from "drizzle-orm";
  * before building the real handler — flagged here rather than guessed at.
  */
 const app = new Hono();
+const log = createLogger("click-redirect");
+
+app.use(async (c, next) => {
+  const incoming = c.req.header("x-request-id");
+  const id = incoming && incoming.length <= 128 ? incoming : crypto.randomUUID();
+  c.set("requestId", id);
+  c.header("x-request-id", id);
+  await next();
+});
+
+declare module "hono" {
+  interface ContextVariableMap {
+    requestId: string;
+  }
+}
 
 app.get("/health", async (c) => {
   try {
@@ -36,8 +52,13 @@ app.get("/c/:token", (c) => {
   return c.text(`Click tracking redirect not yet implemented for token: ${c.req.param("token")}`, 501);
 });
 
+app.onError((err, c) => {
+  log.error({ requestId: c.get("requestId"), err }, "unhandled error");
+  return c.text("Internal server error", 500);
+});
+
 const port = Number(process.env.CLICK_REDIRECT_PORT ?? 8789);
-console.log(`Click redirect service listening on :${port}`);
+log.info({ port }, "click redirect service listening");
 
 export default {
   port,

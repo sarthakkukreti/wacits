@@ -144,7 +144,29 @@ further to add there.
 5. **Deploy**, then confirm all services report healthy in Coolify's UI,
    and check the `caddy` service's logs for routing errors.
 
-6. **Point Meta at it.** In the App Dashboard → WhatsApp → Configuration:
+6. **Apply migrations manually — every deploy that adds one.** Neither
+   `bun run db:migrate` nor `db:security-setup` runs automatically on
+   deploy (confirmed: the `api` service in `docker-compose.yml` has no
+   command override that would run them, and there is no CI/CD step that
+   does either). A migration committed to the repo does **not** take
+   effect until someone runs it by hand against the production database.
+   From Coolify's Terminal for the `postgres` (or `api`) service container,
+   or from a machine with `DATABASE_URL` pointed at the production
+   Postgres:
+   ```
+   bun run db:migrate
+   bun run db:security-setup
+   ```
+   `db:security-setup` is safe to re-run even when nothing changed — it
+   auto-discovers every table with a `client_id` column and (re)applies row-
+   level security idempotently. Run it after every `db:migrate` regardless,
+   since a new tenant-scoped table needs it to actually be protected. If a
+   migration adds a new index (as `0001_misty_miss_america.sql` does), it
+   can take a while to build on a large table — check `pg_stat_progress_
+   create_index` if a migration seems to hang rather than assuming it's
+   stuck.
+
+7. **Point Meta at it.** In the App Dashboard → WhatsApp → Configuration:
    - Callback URL: `https://api.wacits.cyberlative.com/webhook`
    - Verify token: whatever you set for `META_WEBHOOK_VERIFY_TOKEN`
 

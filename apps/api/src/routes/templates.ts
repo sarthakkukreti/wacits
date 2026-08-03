@@ -9,6 +9,7 @@ import {
   withTenant,
 } from "@wacits/db";
 import { decryptToken, listTemplates, MetaApiError } from "@wacits/shared";
+import { requirePermission } from "../middleware/permission";
 
 /**
  * PRD §11 Templates. Templates live on the WABA and are authored and
@@ -70,7 +71,7 @@ templates.get("/", async (c) => {
  * Idempotent — safe to press repeatedly, which matters because template
  * approval is asynchronous and operators will refresh while waiting.
  */
-templates.post("/sync", async (c) => {
+templates.post("/sync", requirePermission("create_template"), async (c) => {
   const { clientId } = c.get("tenant");
 
   const outcome = await withTenant(clientId, async (tx) => {

@@ -13,7 +13,8 @@ import {
   withTenant,
 } from "@wacits/db";
 import { normalisePhone } from "@wacits/shared";
-import { getOperatorUserId } from "../lib/operator";
+import { requirePermission } from "../middleware/permission";
+import { writeAuditLog } from "../lib/audit";
 
 /**
  * PRD §8 Contacts. Phone numbers are normalised to E.164 on the way in
@@ -335,8 +336,8 @@ contacts.patch("/:id", async (c) => {
 
 /** Archive rather than delete: message history references the contact, and
  *  §20 requires the record to remain explainable. */
-contacts.delete("/:id", async (c) => {
-  const { clientId } = c.get("tenant");
+contacts.delete("/:id", requirePermission("archive_contact"), async (c) => {
+  const { clientId, userId } = c.get("tenant");
   const id = c.req.param("id");
 
   const row = await withTenant(clientId, async (tx) => {
@@ -345,6 +346,15 @@ contacts.delete("/:id", async (c) => {
       .set({ archived: "true", archivedAt: new Date(), updatedAt: new Date() })
       .where(eq(contact.id, id))
       .returning({ id: contact.id });
+    if (updated) {
+      await writeAuditLog(tx, {
+        clientId,
+        actorUserId: userId,
+        action: "contact_archived",
+        entityType: "contact",
+        entityId: id,
+      });
+    }
     return updated;
   });
 
@@ -361,11 +371,10 @@ contacts.delete("/:id", async (c) => {
  * §21.7: suppression is not client-scoped — the duty not to contact is owed
  * to the person, not to one workspace.
  */
-contacts.post("/:id/opt-out", async (c) => {
-  const { clientId } = c.get("tenant");
+contacts.post("/:id/opt-out", requirePermission("change_opt_out_status"), async (c) => {
+  const { clientId, userId } = c.get("tenant");
   const id = c.req.param("id");
   const body = await c.req.json<{ reason?: string; sourceType?: string }>().catch(() => ({}) as any);
-  const operatorUserId = await getOperatorUserId();
 
   const result = await withTenant(clientId, async (tx) => {
     const [row] = await tx.select().from(contact).where(eq(contact.id, id)).limit(1);
@@ -379,10 +388,18 @@ contacts.post("/:id/opt-out", async (c) => {
       category: "all",
       sourceType: (body?.sourceType as any) ?? "off_platform_request",
       sourceReference: body?.reason ?? "Recorded by operator in dashboard",
-      recordedBy: operatorUserId,
+      recordedBy: userId,
     });
 
     await tx.update(contact).set({ marketingConsentState: "opted_out", updatedAt: new Date() }).where(eq(contact.id, id));
+    await writeAuditLog(tx, {
+      clientId,
+      actorUserId: userId,
+      action: "contact_opted_out",
+      entityType: "contact",
+      entityId: id,
+      beforeAfterSummary: { reason: body?.reason ?? null },
+    });
     return row;
   });
 
@@ -409,11 +426,16 @@ contacts.post("/:id/opt-out", async (c) => {
 });
 
 /** Opt-in removes the suppression entry and records the evidence (§10). */
-contacts.post("/:id/opt-in", async (c) => {
-  const { clientId } = c.get("tenant");
+contacts.post("/:id/opt-in", requirePermission("change_opt_out_status"), async (c) => {
+  const { clientId, userId, role } = c.get("tenant");
+  // The matrix's qualifier for campaign_manager is "opt-out only, not
+  // re-opt-in" — requirePermission() can't see which direction this is, so
+  // the block for that one role lives here.
+  if (role === "campaign_manager") {
+    return c.json({ error: "Not permitted: opt-in (campaign managers may only opt contacts out)" }, 403);
+  }
   const id = c.req.param("id");
   const body = await c.req.json<{ wording?: string; sourceType?: string }>().catch(() => ({}) as any);
-  const operatorUserId = await getOperatorUserId();
 
   const result = await withTenant(clientId, async (tx) => {
     const [row] = await tx.select().from(contact).where(eq(contact.id, id)).limit(1);
@@ -427,9 +449,16 @@ contacts.post("/:id/opt-in", async (c) => {
       category: "marketing",
       verbatimConsentWording: body?.wording ?? null,
       sourceType: (body?.sourceType as any) ?? "off_platform_request",
-      recordedBy: operatorUserId,
+      recordedBy: userId,
     });
     await tx.update(contact).set({ marketingConsentState: "opted_in", updatedAt: new Date() }).where(eq(contact.id, id));
+    await writeAuditLog(tx, {
+      clientId,
+      actorUserId: userId,
+      action: "contact_opted_in",
+      entityType: "contact",
+      entityId: id,
+    });
     return row;
   });
 
@@ -549,11 +578,10 @@ contacts.get("/meta/groups", async (c) => {
   );
 });
 
-contacts.post("/meta/groups", async (c) => {
-  const { clientId } = c.get("tenant");
+contacts.post("/meta/groups", requirePermission("manage_groups_and_tags"), async (c) => {
+  const { clientId, userId } = c.get("tenant");
   const body = await c.req.json<{ name: string; description?: string } & BulkBody>();
   if (!body.name?.trim()) return c.json({ error: "A group name is required." }, 400);
-  const operatorUserId = await getOperatorUserId();
 
   const result = await withTenant(clientId, async (tx) => {
     // Members are resolved before the group is inserted, so a selection that
@@ -574,7 +602,7 @@ contacts.post("/meta/groups", async (c) => {
       for (const batch of chunk(targets.ids, 5_000)) {
         await tx
           .insert(contactGroupMember)
-          .values(batch.map((contactId) => ({ clientId, groupId: group.id, contactId, addedBy: operatorUserId })))
+          .values(batch.map((contactId) => ({ clientId, groupId: group.id, contactId, addedBy: userId })))
           .onConflictDoNothing({ target: [contactGroupMember.groupId, contactGroupMember.contactId] });
       }
       await recountGroup(tx, group.id);
@@ -586,7 +614,7 @@ contacts.post("/meta/groups", async (c) => {
   return c.json({ group: result.group, added: result.added }, 201);
 });
 
-contacts.patch("/meta/groups/:groupId", async (c) => {
+contacts.patch("/meta/groups/:groupId", requirePermission("manage_groups_and_tags"), async (c) => {
   const { clientId } = c.get("tenant");
   const groupId = c.req.param("groupId");
   const body = await c.req.json<{ name?: string; description?: string }>();
@@ -616,7 +644,7 @@ contacts.patch("/meta/groups/:groupId", async (c) => {
 
 /** Deletes the group and its membership rows (ON DELETE CASCADE). The
  *  contacts themselves are untouched — a group is a label, not a container. */
-contacts.delete("/meta/groups/:groupId", async (c) => {
+contacts.delete("/meta/groups/:groupId", requirePermission("manage_groups_and_tags"), async (c) => {
   const { clientId } = c.get("tenant");
   const row = await withTenant(clientId, async (tx) => {
     const [deleted] = await tx
@@ -629,11 +657,10 @@ contacts.delete("/meta/groups/:groupId", async (c) => {
   return c.json({ deleted: true });
 });
 
-contacts.post("/meta/groups/:groupId/members", async (c) => {
-  const { clientId } = c.get("tenant");
+contacts.post("/meta/groups/:groupId/members", requirePermission("manage_groups_and_tags"), async (c) => {
+  const { clientId, userId } = c.get("tenant");
   const groupId = c.req.param("groupId");
   const body = await c.req.json<BulkBody>();
-  const operatorUserId = await getOperatorUserId();
 
   const result = await withTenant(clientId, async (tx) => {
     const [group] = await tx
@@ -649,7 +676,7 @@ contacts.post("/meta/groups/:groupId/members", async (c) => {
     for (const batch of chunk(targets.ids, 5_000)) {
       await tx
         .insert(contactGroupMember)
-        .values(batch.map((contactId) => ({ clientId, groupId, contactId, addedBy: operatorUserId })))
+        .values(batch.map((contactId) => ({ clientId, groupId, contactId, addedBy: userId })))
         .onConflictDoNothing({ target: [contactGroupMember.groupId, contactGroupMember.contactId] });
     }
     const memberCount = await recountGroup(tx, groupId);
@@ -660,7 +687,7 @@ contacts.post("/meta/groups/:groupId/members", async (c) => {
   return c.json({ added: result.added, memberCount: result.memberCount });
 });
 
-contacts.post("/meta/groups/:groupId/members/remove", async (c) => {
+contacts.post("/meta/groups/:groupId/members/remove", requirePermission("manage_groups_and_tags"), async (c) => {
   const { clientId } = c.get("tenant");
   const groupId = c.req.param("groupId");
   const body = await c.req.json<BulkBody>();
@@ -708,11 +735,10 @@ contacts.get("/meta/tags", async (c) => {
   );
 });
 
-contacts.post("/meta/tags", async (c) => {
-  const { clientId } = c.get("tenant");
+contacts.post("/meta/tags", requirePermission("manage_groups_and_tags"), async (c) => {
+  const { clientId, userId } = c.get("tenant");
   const body = await c.req.json<{ name: string; color?: string } & BulkBody>();
   if (!body.name?.trim()) return c.json({ error: "A label name is required." }, 400);
-  const operatorUserId = await getOperatorUserId();
 
   const name = body.name.trim();
 
@@ -738,7 +764,7 @@ contacts.post("/meta/tags", async (c) => {
     for (const batch of chunk(targets.ids, 5_000)) {
       await tx
         .insert(contactTag)
-        .values(batch.map((contactId) => ({ clientId, tagId, contactId, appliedBy: operatorUserId })))
+        .values(batch.map((contactId) => ({ clientId, tagId, contactId, appliedBy: userId })))
         .onConflictDoNothing({ target: [contactTag.tagId, contactTag.contactId] });
     }
     return { ok: true as const, tag: row, tagged: targets.ids.length };
@@ -748,7 +774,7 @@ contacts.post("/meta/tags", async (c) => {
   return c.json({ tag: result.tag, tagged: result.tagged }, 201);
 });
 
-contacts.patch("/meta/tags/:tagId", async (c) => {
+contacts.patch("/meta/tags/:tagId", requirePermission("manage_groups_and_tags"), async (c) => {
   const { clientId } = c.get("tenant");
   const body = await c.req.json<{ name?: string; color?: string }>();
 
@@ -776,7 +802,7 @@ contacts.patch("/meta/tags/:tagId", async (c) => {
   }
 });
 
-contacts.delete("/meta/tags/:tagId", async (c) => {
+contacts.delete("/meta/tags/:tagId", requirePermission("manage_groups_and_tags"), async (c) => {
   const { clientId } = c.get("tenant");
   const row = await withTenant(clientId, async (tx) => {
     const [deleted] = await tx
@@ -789,11 +815,10 @@ contacts.delete("/meta/tags/:tagId", async (c) => {
   return c.json({ deleted: true });
 });
 
-contacts.post("/meta/tags/:tagId/contacts", async (c) => {
-  const { clientId } = c.get("tenant");
+contacts.post("/meta/tags/:tagId/contacts", requirePermission("manage_groups_and_tags"), async (c) => {
+  const { clientId, userId } = c.get("tenant");
   const tagId = c.req.param("tagId");
   const body = await c.req.json<BulkBody>();
-  const operatorUserId = await getOperatorUserId();
 
   const result = await withTenant(clientId, async (tx) => {
     const [row] = await tx.select({ id: tag.id }).from(tag).where(eq(tag.id, tagId)).limit(1);
@@ -805,7 +830,7 @@ contacts.post("/meta/tags/:tagId/contacts", async (c) => {
     for (const batch of chunk(targets.ids, 5_000)) {
       await tx
         .insert(contactTag)
-        .values(batch.map((contactId) => ({ clientId, tagId, contactId, appliedBy: operatorUserId })))
+        .values(batch.map((contactId) => ({ clientId, tagId, contactId, appliedBy: userId })))
         .onConflictDoNothing({ target: [contactTag.tagId, contactTag.contactId] });
     }
     return { ok: true as const, tagged: targets.ids.length };
@@ -815,7 +840,7 @@ contacts.post("/meta/tags/:tagId/contacts", async (c) => {
   return c.json({ tagged: result.tagged });
 });
 
-contacts.post("/meta/tags/:tagId/contacts/remove", async (c) => {
+contacts.post("/meta/tags/:tagId/contacts/remove", requirePermission("manage_groups_and_tags"), async (c) => {
   const { clientId } = c.get("tenant");
   const tagId = c.req.param("tagId");
   const body = await c.req.json<BulkBody>();
@@ -855,22 +880,21 @@ contacts.get("/meta/types", async (c) => {
 
 // --- Single-contact label edits (registered after every /meta route) --------
 
-contacts.post("/:id/tags", async (c) => {
-  const { clientId } = c.get("tenant");
+contacts.post("/:id/tags", requirePermission("manage_groups_and_tags"), async (c) => {
+  const { clientId, userId } = c.get("tenant");
   const id = c.req.param("id");
   const body = await c.req.json<{ tagId: string }>();
-  const operatorUserId = await getOperatorUserId();
 
   await withTenant(clientId, async (tx) => {
     await tx
       .insert(contactTag)
-      .values({ clientId, contactId: id, tagId: body.tagId, appliedBy: operatorUserId })
+      .values({ clientId, contactId: id, tagId: body.tagId, appliedBy: userId })
       .onConflictDoNothing({ target: [contactTag.tagId, contactTag.contactId] });
   });
   return c.json({ tagged: true });
 });
 
-contacts.delete("/:id/tags/:tagId", async (c) => {
+contacts.delete("/:id/tags/:tagId", requirePermission("manage_groups_and_tags"), async (c) => {
   const { clientId } = c.get("tenant");
   await withTenant(clientId, async (tx) => {
     await tx
@@ -880,11 +904,10 @@ contacts.delete("/:id/tags/:tagId", async (c) => {
   return c.json({ untagged: true });
 });
 
-contacts.post("/:id/groups", async (c) => {
-  const { clientId } = c.get("tenant");
+contacts.post("/:id/groups", requirePermission("manage_groups_and_tags"), async (c) => {
+  const { clientId, userId } = c.get("tenant");
   const id = c.req.param("id");
   const body = await c.req.json<{ groupId: string }>();
-  const operatorUserId = await getOperatorUserId();
 
   const ok = await withTenant(clientId, async (tx) => {
     const [group] = await tx
@@ -896,7 +919,7 @@ contacts.post("/:id/groups", async (c) => {
 
     await tx
       .insert(contactGroupMember)
-      .values({ clientId, groupId: body.groupId, contactId: id, addedBy: operatorUserId })
+      .values({ clientId, groupId: body.groupId, contactId: id, addedBy: userId })
       .onConflictDoNothing({ target: [contactGroupMember.groupId, contactGroupMember.contactId] });
     await recountGroup(tx, body.groupId);
     return true;
@@ -906,7 +929,7 @@ contacts.post("/:id/groups", async (c) => {
   return c.json({ added: true });
 });
 
-contacts.delete("/:id/groups/:groupId", async (c) => {
+contacts.delete("/:id/groups/:groupId", requirePermission("manage_groups_and_tags"), async (c) => {
   const { clientId } = c.get("tenant");
   const groupId = c.req.param("groupId");
   await withTenant(clientId, async (tx) => {

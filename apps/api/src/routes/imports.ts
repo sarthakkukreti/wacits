@@ -15,7 +15,7 @@ import {
   withTenant,
 } from "@wacits/db";
 import { normalisePhone } from "@wacits/shared";
-import { getOperatorUserId } from "../lib/operator";
+import { requirePermission } from "../middleware/permission";
 
 /**
  * PRD §9 Contact import. Three steps, deliberately separate:
@@ -261,7 +261,7 @@ export function mapRows(rows: Record<string, string>[], mapping: Record<string, 
  * already suppressed, because an operator importing 5,000 numbers deserves
  * to know 40 of them have opted out before they build a campaign on it.
  */
-imports.post("/preview", async (c) => {
+imports.post("/preview", requirePermission("import_contacts"), async (c) => {
   const { clientId } = c.get("tenant");
   const body = await c.req.json<{ csv: string; mapping?: Record<string, string | null> }>();
 
@@ -382,8 +382,8 @@ imports.post("/preview", async (c) => {
 });
 
 /** Step 2 — apply. Upserts on (client, phone); records every rejected row. */
-imports.post("/commit", async (c) => {
-  const { clientId } = c.get("tenant");
+imports.post("/commit", requirePermission("import_contacts"), async (c) => {
+  const { clientId, userId } = c.get("tenant");
   const body = await c.req.json<{
     csv: string;
     mapping: Record<string, string | null>;
@@ -399,7 +399,6 @@ imports.post("/commit", async (c) => {
   if (!body.csv?.trim()) return c.json({ error: "csv content is required" }, 400);
   if (!body.mapping?.phoneNumber) return c.json({ error: "mapping.phoneNumber is required" }, 400);
 
-  const operatorUserId = await getOperatorUserId();
   const { rows } = parseCsv(body.csv);
   if (rows.length > MAX_ROWS) return c.json({ error: `Too many rows (limit ${MAX_ROWS}).` }, 400);
 
@@ -434,7 +433,7 @@ imports.post("/commit", async (c) => {
       .insert(importJob)
       .values({
         clientId,
-        uploadedBy: operatorUserId,
+        uploadedBy: userId,
         fileName: body.fileName ?? "upload.csv",
         fileSize: body.csv.length,
         rowCount: rows.length,
@@ -492,7 +491,7 @@ imports.post("/commit", async (c) => {
       const values = names
         .map((name) => tagIdByName.get(name))
         .filter((tagId): tagId is string => Boolean(tagId))
-        .map((tagId) => ({ clientId, tagId, contactId, appliedBy: operatorUserId }));
+        .map((tagId) => ({ clientId, tagId, contactId, appliedBy: userId }));
       if (!values.length) return;
       const applied = await tx
         .insert(contactTag)
@@ -540,7 +539,7 @@ imports.post("/commit", async (c) => {
         if (groupId) {
           await tx
             .insert(contactGroupMember)
-            .values({ clientId, groupId, contactId: existing.id, addedBy: operatorUserId })
+            .values({ clientId, groupId, contactId: existing.id, addedBy: userId })
             .onConflictDoNothing({ target: [contactGroupMember.groupId, contactGroupMember.contactId] });
         }
         // Labels are additive on an update, like every other field here: a
@@ -575,7 +574,7 @@ imports.post("/commit", async (c) => {
         if (groupId) {
           await tx
             .insert(contactGroupMember)
-            .values({ clientId, groupId, contactId: newContact.id, addedBy: operatorUserId })
+            .values({ clientId, groupId, contactId: newContact.id, addedBy: userId })
             .onConflictDoNothing({ target: [contactGroupMember.groupId, contactGroupMember.contactId] });
         }
         await applyLabels(newContact.id, row.labels);
@@ -642,14 +641,18 @@ imports.get("/:id/errors", async (c) => {
 
 /** DM-28 — the only rollback that exists in the product, and only within
  *  24 hours, and only for contacts this import created. */
-imports.post("/:id/undo", async (c) => {
-  const { clientId } = c.get("tenant");
+imports.post("/:id/undo", requirePermission("undo_import"), async (c) => {
+  const { clientId, userId, role } = c.get("tenant");
   const id = c.req.param("id");
-  const operatorUserId = await getOperatorUserId();
 
   const outcome = await withTenant(clientId, async (tx) => {
     const [job] = await tx.select().from(importJob).where(eq(importJob.id, id)).limit(1);
     if (!job) return { error: "Import not found" as const };
+    // The matrix's qualifier for campaign_manager is "own import, within
+    // 24h" — client_admin (and super_admin) may undo any import.
+    if (role === "campaign_manager" && job.uploadedBy !== userId) {
+      return { error: "You can only undo an import you started yourself." as const };
+    }
     if (job.undoneAt) return { error: "This import has already been undone." as const };
     if (!job.undoAvailableUntil || job.undoAvailableUntil.getTime() < Date.now()) {
       return { error: "The 24-hour undo window for this import has expired." as const };
@@ -666,7 +669,7 @@ imports.post("/:id/undo", async (c) => {
       removed++;
     }
 
-    await tx.update(importJob).set({ undoneAt: new Date(), undoneBy: operatorUserId }).where(eq(importJob.id, id));
+    await tx.update(importJob).set({ undoneAt: new Date(), undoneBy: userId }).where(eq(importJob.id, id));
     return { removed };
   });
 

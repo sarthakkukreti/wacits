@@ -301,6 +301,35 @@ export async function listTemplates(args: {
 }
 
 // ---------------------------------------------------------------------------
+// Token health (SN-17/SN-18)
+// ---------------------------------------------------------------------------
+
+/**
+ * Self-inspects a stored token via Meta's /debug_token — works for both
+ * WABA- and phone-number-scoped tokens without needing to know which Meta
+ * object it belongs to, since a token can always inspect itself. Used by
+ * the scheduler's periodic health check (apps/workers/src/scheduler-worker.ts).
+ */
+export async function checkTokenHealth(args: { token: string }): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const result = await graphFetch<{ data?: { is_valid?: boolean } }>({
+      method: "GET",
+      path: "debug_token",
+      apiSurface: "/debug_token",
+      token: args.token,
+      query: { input_token: args.token },
+    });
+    if (result.data?.is_valid === false) {
+      return { ok: false, error: "Token reported as invalid by Meta" };
+    }
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof MetaApiError) return { ok: false, error: err.message };
+    throw err; // transport failure — let the caller decide whether to retry
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Media
 // ---------------------------------------------------------------------------
 

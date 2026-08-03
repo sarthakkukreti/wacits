@@ -1,5 +1,8 @@
 import "server-only";
 
+import { cookies } from "next/headers";
+import { SESSION_COOKIE } from "./session-cookie";
+
 /**
  * Server-side API client. This module must never be imported into a client
  * component: it holds the API shared secret, and the whole point of routing
@@ -58,7 +61,11 @@ type RequestOptions = {
   tenant?: boolean;
   /** The end-user's session token (from the wacits_session cookie), sent as
    *  x-session-token — a separate header from Authorization, which stays
-   *  the service-to-service secret. Only /auth/* routes need this. */
+   *  the service-to-service secret. Explicit callers (the /auth/* actions)
+   *  pass this themselves; every other tenant-scoped call gets it attached
+   *  automatically below, from the cookie, so the API can resolve a real
+   *  actor for permission checks and audit logging without every one of the
+   *  ~dozen server actions having to thread it through by hand. */
   sessionToken?: string;
 };
 
@@ -68,7 +75,9 @@ export async function api<T = any>(path: string, opts: RequestOptions = {}): Pro
   const headers: Record<string, string> = { ...authHeaders() };
   if (body) headers["Content-Type"] = "application/json";
   if (tenant) headers["x-client-id"] = await resolveClientId();
-  if (sessionToken) headers["x-session-token"] = sessionToken;
+
+  const token = tenant ? (sessionToken ?? (await cookies()).get(SESSION_COOKIE)?.value) : sessionToken;
+  if (token) headers["x-session-token"] = token;
 
   const res = await fetch(`${API_URL}${path}`, {
     method,

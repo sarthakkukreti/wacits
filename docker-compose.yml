@@ -163,6 +163,14 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-wacits}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wacits}
       REDIS_URL: redis://valkey:6379
+    # Detects a HUNG worker (stuck on a DB transaction, a poisoned job
+    # looping forever), not just a crashed one — `restart: unless-stopped`
+    # alone only catches the latter. See apps/workers/src/lib/health.ts.
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:8790/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       postgres:
         condition: service_healthy
@@ -179,6 +187,11 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-wacits}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wacits}
       REDIS_URL: redis://valkey:6379
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:8791/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       postgres:
         condition: service_healthy
@@ -195,6 +208,11 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-wacits}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wacits}
       REDIS_URL: redis://valkey:6379
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:8792/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       postgres:
         condition: service_healthy
@@ -215,6 +233,11 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-wacits}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wacits}
       REDIS_URL: redis://valkey:6379
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:8793/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       postgres:
         condition: service_healthy

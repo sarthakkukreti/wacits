@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import "./globals.css";
 import { Nav } from "../components/Nav";
+import { ToastProvider } from "../components/Toast";
 import { apiSafe } from "../lib/api";
 import { requireSession } from "../lib/session";
 
@@ -39,10 +40,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang="en">
       <body>
         {session ? (
-          <div className="app">
-            <Nav unreadCount={unread} superAdmin={session.user.superAdmin} email={session.user.email} />
-            <div className="main">{children}</div>
-          </div>
+          <ToastProvider>
+            <div className="app">
+              <Nav unreadCount={unread} superAdmin={session.user.superAdmin} email={session.user.email} />
+              <main className="main">{children}</main>
+            </div>
+          </ToastProvider>
         ) : (
           children
         )}

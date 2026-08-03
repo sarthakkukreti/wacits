@@ -2,6 +2,10 @@ import { Worker } from "bullmq";
 import { eq } from "drizzle-orm";
 import { createRedisConnection, type ImportJobData } from "@wacits/queue";
 import { importJob, withSystemAccess } from "@wacits/db";
+import { createLogger } from "@wacits/shared";
+import { startWorkerHealthServer } from "./lib/health";
+
+const log = createLogger("import-worker");
 
 /**
  * PRD §9 Contact import — parses uploaded spreadsheets/CSVs in a queued
@@ -18,25 +22,29 @@ const worker = new Worker<ImportJobData>(
   async (job) => {
     const { importJobId } = job.data;
 
+    // Nothing enqueues to `importQueue` today — the real parse pipeline
+    // (apps/api/src/routes/imports.ts) runs synchronously inline in the
+    // /commit HTTP handler instead, which is the PRD's own architecture
+    // violation to fix (import must run queued, not inline), not a case of
+    // this worker being unfinished. This path is therefore currently dead,
+    // but a stub that silently marked the job "completed" without doing
+    // anything was a landmine for whoever wires the queue up later and
+    // misses this comment — so it fails loudly instead.
     await withSystemAccess(async (tx) => {
       await tx.update(importJob).set({ state: "running", startedAt: new Date() }).where(eq(importJob.id, importJobId));
-
-      // TODO (Phase 2, §9): stream the file through exceljs/papaparse,
-      // validate + normalise phone numbers with libphonenumber-js (TS-4/
-      // TS-5), detect duplicates, write import_error rows for rejects,
-      // write import_created_contact rows for new contacts (DM-28 depends
-      // on this), and require an explicit consent-source declaration
-      // before any row can be marked opted-in.
-      console.log(`[import-worker] would parse import job ${importJobId} — parser not yet implemented.`);
-
-      await tx.update(importJob).set({ state: "completed", finishedAt: new Date() }).where(eq(importJob.id, importJobId));
+      await tx.update(importJob).set({ state: "failed", finishedAt: new Date() }).where(eq(importJob.id, importJobId));
     });
+
+    throw new Error(
+      `import-worker has no parser implementation — see apps/api/src/routes/imports.ts for the real (synchronous) import logic. Job ${job.id} intentionally failed rather than reporting a false success.`,
+    );
   },
   { connection: createRedisConnection(), prefix: process.env.QUEUE_PREFIX ?? "wacits" },
 );
 
 worker.on("failed", (job, err) => {
-  console.error(`[import-worker] job ${job?.id} failed:`, err);
+  log.error({ jobId: job?.id, correlationId: job?.data?.correlationId, err: err.message }, "job failed");
 });
 
-console.log("Import worker running.");
+startWorkerHealthServer(Number(process.env.IMPORT_WORKER_PORT ?? 8791), worker);
+log.info("import worker running");

@@ -7,11 +7,13 @@ import { user, withSystemAccess } from "@wacits/db";
  * …). That is correct and should stay — an audit trail with a nullable
  * actor is not an audit trail.
  *
- * Real per-user auth (Better Auth) is Phase 1 and is not wired yet, so
- * until it is, every dashboard action is attributed to a single seeded
- * operator account. This is deliberately one row, clearly named, so that
- * when real sign-in arrives it is obvious which historical rows predate it
- * rather than being silently mixed in with genuine per-user attribution.
+ * Every dashboard route now attributes writes to the real signed-in user via
+ * `c.get("tenant").userId` (see middleware/tenant.ts) — no route calls
+ * getOperatorUserId() any more. This account is reserved for genuinely
+ * unattended, system-initiated writes with no human actor (none exist yet);
+ * kept as one row, clearly named, so any historical row still attributed to
+ * it is obviously pre-dating real per-user attribution rather than being
+ * silently mixed in with it.
  */
 
 const OPERATOR_EMAIL = "operator@cyberlative.local";

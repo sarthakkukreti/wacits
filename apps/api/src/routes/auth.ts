@@ -5,6 +5,7 @@ import { account, session, user, withSystemAccess } from "@wacits/db";
 import { hashPassword, verifyPassword } from "@wacits/shared";
 import { hashToken, resolveSession } from "../lib/session";
 import { checkLoginRateLimit, recordLoginFailure, resetLoginRateLimit } from "../lib/login-rate-limit";
+import { writeAuditLog } from "../lib/audit";
 
 /**
  * End-user login/session. Platform-level (a user isn't scoped to one
@@ -60,6 +61,18 @@ auth.post("/login", async (c) => {
     // DUMMY_HASH above — see the module comment.
     if (!row) verifyPassword(password, DUMMY_HASH);
     await recordLoginFailure(email, ipAddress);
+    await withSystemAccess((tx) =>
+      writeAuditLog(tx, {
+        clientId: null,
+        actorUserId: row?.userId ?? null,
+        action: "login_failure",
+        entityType: "user",
+        entityId: row?.userId ?? null,
+        beforeAfterSummary: { email },
+        ipAddress,
+        userAgent,
+      }),
+    );
     // Deliberately identical message/status whether the email doesn't
     // exist or the password is wrong — same terse philosophy as
     // requireApiCredential (middleware/auth.ts).
@@ -73,6 +86,15 @@ auth.post("/login", async (c) => {
   await withSystemAccess(async (tx) => {
     await tx.insert(session).values({ userId: row!.userId, token: hashToken(rawToken), expiresAt, ipAddress, userAgent });
     await tx.update(user).set({ lastSignInAt: new Date() }).where(eq(user.id, row!.userId));
+    await writeAuditLog(tx, {
+      clientId: null,
+      actorUserId: row!.userId,
+      action: "login_success",
+      entityType: "user",
+      entityId: row!.userId,
+      ipAddress,
+      userAgent,
+    });
   });
 
   return c.json({
@@ -92,7 +114,22 @@ auth.get("/session", async (c) => {
 auth.post("/logout", async (c) => {
   const token = c.req.header("x-session-token") ?? "";
   if (token) {
-    await withSystemAccess((tx) => tx.delete(session).where(eq(session.token, hashToken(token))));
+    // Resolved before deleting so the audit entry can name a real actor —
+    // an already-expired/invalid token still deletes cleanly but leaves
+    // nothing meaningful to log.
+    const resolved = await resolveSession(token);
+    await withSystemAccess(async (tx) => {
+      await tx.delete(session).where(eq(session.token, hashToken(token)));
+      if (resolved) {
+        await writeAuditLog(tx, {
+          clientId: null,
+          actorUserId: resolved.id,
+          action: "logout",
+          entityType: "user",
+          entityId: resolved.id,
+        });
+      }
+    });
   }
   return c.body(null, 204);
 });

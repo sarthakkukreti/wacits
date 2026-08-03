@@ -1,10 +1,11 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { logger } from "hono/logger";
 import { client, db, withSystemAccess } from "@wacits/db";
+import { createLogger } from "@wacits/shared";
 import { eq, sql } from "drizzle-orm";
 import { tenantMiddleware } from "./middleware/tenant";
 import { requireApiCredential } from "./middleware/auth";
+import { requestIdMiddleware } from "./middleware/request-id";
 import contacts from "./routes/contacts";
 import imports from "./routes/imports";
 import inbox from "./routes/inbox";
@@ -14,6 +15,7 @@ import settings from "./routes/settings";
 import dashboard from "./routes/dashboard";
 import messageLog from "./routes/messages";
 import authRoutes from "./routes/auth";
+import usersRoutes from "./routes/users";
 import { bootstrapSuperAdmin } from "./lib/bootstrap-admin";
 
 // Idempotent (mirrors getOperatorUserId()'s pattern) — a true no-op once the
@@ -25,9 +27,19 @@ import { bootstrapSuperAdmin } from "./lib/bootstrap-admin";
 // already-working production API.
 await bootstrapSuperAdmin();
 
+const log = createLogger("api");
+
 const app = new Hono();
 
-app.use(logger());
+app.use(requestIdMiddleware);
+app.use(async (c, next) => {
+  const start = Date.now();
+  await next();
+  log.info(
+    { requestId: c.get("requestId"), method: c.req.method, path: c.req.path, status: c.res.status, durationMs: Date.now() - start },
+    "request",
+  );
+});
 
 // Split hosting: the web app (Hostinger) and this API (VPS, behind Caddy at
 // api.wacits.cyberlative.com) are different origins now, so this is a real
@@ -103,6 +115,7 @@ workspace.route("/templates", templates);
 workspace.route("/settings", settings);
 workspace.route("/dashboard", dashboard);
 workspace.route("/messages", messageLog);
+workspace.route("/users", usersRoutes);
 
 app.route("/workspace", workspace);
 
@@ -116,12 +129,16 @@ app.get("/", (c) =>
 // One place where an unhandled error becomes a response, so a stack trace
 // never leaks to a caller but is always logged server-side.
 app.onError((err, c) => {
-  console.error("[api] unhandled error:", err);
+  log.error({ requestId: c.get("requestId"), err }, "unhandled error");
   return c.json({ error: "Internal server error" }, 500);
 });
 
 const port = Number(process.env.API_PORT ?? 8787);
 console.log(`API listening on :${port}`);
+
+// Exported (not just the default {port, fetch}) so tests can drive the real
+// app in-process via app.request() — see tenant-isolation.test.ts.
+export { app };
 
 export default {
   port,

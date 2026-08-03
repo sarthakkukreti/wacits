@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { and, count, desc, eq, gte, sql } from "drizzle-orm";
 import { campaign, contact, conversation, message, senderNumber, withTenant } from "@wacits/db";
+import { requirePermission } from "../middleware/permission";
 
 /**
  * PRD §15 Reporting — the numbers an operator needs on opening the app.
@@ -9,7 +10,7 @@ import { campaign, contact, conversation, message, senderNumber, withTenant } fr
  */
 const dashboard = new Hono();
 
-dashboard.get("/", async (c) => {
+dashboard.get("/", requirePermission("view_reports"), async (c) => {
   const { clientId } = c.get("tenant");
   const days = Math.min(90, Math.max(1, Number(c.req.query("days") ?? 30)));
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);

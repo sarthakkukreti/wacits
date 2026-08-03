@@ -16,6 +16,7 @@ import {
   withSystemAccess,
 } from "@wacits/db";
 import {
+  createLogger,
   decryptToken,
   MetaApiError,
   MetaTransportError,
@@ -24,6 +25,9 @@ import {
   type TemplateComponent,
 } from "@wacits/shared";
 import { classifyError } from "./lib/error-classification";
+import { startWorkerHealthServer } from "./lib/health";
+
+const log = createLogger("send-worker");
 
 /**
  * PRD §13 Sending engine — drains the send queue, calls Meta, records the
@@ -83,7 +87,8 @@ export function buildComponents(
 const worker = new Worker<SendJobData>(
   "send",
   async (job) => {
-    const { campaignRecipientId } = job.data;
+    const { campaignRecipientId, correlationId } = job.data;
+    const jobLog = log.child({ correlationId, campaignRecipientId });
 
     await withSystemAccess(async (tx) => {
       const [row] = await tx
@@ -104,7 +109,7 @@ const worker = new Worker<SendJobData>(
         .limit(1);
 
       if (!row) {
-        console.warn(`[send-worker] campaign_recipient ${campaignRecipientId} not found — skipping.`);
+        jobLog.warn("campaign_recipient not found — skipping");
         return;
       }
 
@@ -112,7 +117,7 @@ const worker = new Worker<SendJobData>(
 
       // AR-16: never resend.
       if (recipient.state !== "pending" && recipient.state !== "queued") {
-        console.log(`[send-worker] ${campaignRecipientId} already '${recipient.state}' — no-op.`);
+        jobLog.info({ state: recipient.state }, "already resolved — no-op");
         return;
       }
 
@@ -253,10 +258,7 @@ const worker = new Worker<SendJobData>(
         const { code, apiSurface } = err.detail;
         const classification = await classifyError(tx, apiSurface, code);
 
-        console.warn(
-          `[send-worker] ${campaignRecipientId} failed: ${apiSurface} ${code} ` +
-            `(${classification.errorClass}) — ${classification.title}`,
-        );
+        jobLog.warn({ apiSurface, code, errorClass: classification.errorClass, title: classification.title }, "send failed");
 
         if (classification.errorClass === "RETRY_BACKOFF") {
           await tx
@@ -365,7 +367,8 @@ const worker = new Worker<SendJobData>(
 );
 
 worker.on("failed", (job, err) => {
-  console.error(`[send-worker] job ${job?.id} failed:`, err.message);
+  log.error({ jobId: job?.id, correlationId: job?.data?.correlationId, err: err.message }, "job failed");
 });
 
-console.log("Send worker running.");
+startWorkerHealthServer(Number(process.env.SEND_WORKER_PORT ?? 8790), worker);
+log.info("send worker running");

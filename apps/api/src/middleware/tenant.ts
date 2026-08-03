@@ -1,31 +1,78 @@
 import type { MiddlewareHandler } from "hono";
+import { and, eq, isNull } from "drizzle-orm";
+import { userClientRole, withSystemAccess } from "@wacits/db";
+import type { WorkspaceRole } from "@wacits/shared";
+import { resolveSession } from "../lib/session";
+import { writeAuditLog } from "../lib/audit";
 
 /**
- * Resolves the active workspace for a request. Real auth (Better Auth
- * sessions, §6 role checks) is Phase 1 work — see PRD §25. For this
- * scaffold, the workspace and actor are taken from headers so the wiring
- * between web → API → withTenant()/RLS can be exercised end to end without
- * a full login flow. Every real route handler must resolve `clientId`
- * through this context, never by trusting a client-supplied value that
- * bypasses the session.
+ * Resolves the active workspace for a request AND verifies the signed-in
+ * user actually belongs to it. `x-client-id` names the target workspace
+ * (set by apps/web/lib/api.ts's resolveClientId()); `x-session-token`
+ * identifies the caller (auto-attached from the session cookie — see
+ * apps/web/lib/api.ts). Every route under /workspace goes through this
+ * before touching withTenant()/RLS, so `role` here is what
+ * requirePermission() (middleware/permission.ts) checks against — never a
+ * client-supplied value.
  */
 export type TenantContext = {
   clientId: string;
-  userId: string | null;
+  userId: string;
+  role: WorkspaceRole | "super_admin";
 };
 
 export const tenantMiddleware: MiddlewareHandler = async (c, next) => {
   const clientId = c.req.header("x-client-id");
-  const userId = c.req.header("x-user-id") ?? null;
-
   if (!clientId) {
-    return c.json(
-      { error: "Missing x-client-id header. (Placeholder for a real session — see PRD §6/§25.)" },
-      400,
-    );
+    return c.json({ error: "Missing x-client-id header." }, 400);
   }
 
-  c.set("tenant", { clientId, userId } satisfies TenantContext);
+  const sessionToken = c.req.header("x-session-token");
+  const sessionUser = sessionToken ? await resolveSession(sessionToken) : null;
+  if (!sessionUser) {
+    return c.json({ error: "Missing or invalid session." }, 401);
+  }
+
+  if (sessionUser.superAdmin) {
+    c.set("tenant", { clientId, userId: sessionUser.id, role: "super_admin" } satisfies TenantContext);
+    await next();
+    return;
+  }
+
+  const [membership] = await withSystemAccess((tx) =>
+    tx
+      .select({ role: userClientRole.role })
+      .from(userClientRole)
+      .where(
+        and(
+          eq(userClientRole.userId, sessionUser.id),
+          eq(userClientRole.clientId, clientId),
+          isNull(userClientRole.revokedAt),
+        ),
+      )
+      .limit(1),
+  );
+
+  if (!membership) {
+    // A non-member trying a workspace is itself worth recording — it's
+    // either a stale client link or a real access-boundary probe.
+    await withSystemAccess((tx) =>
+      writeAuditLog(tx, {
+        clientId,
+        actorUserId: sessionUser.id,
+        action: "access_denied_not_member",
+        entityType: "client",
+        entityId: clientId,
+      }),
+    );
+    return c.json({ error: "You are not a member of this workspace." }, 403);
+  }
+
+  c.set("tenant", {
+    clientId,
+    userId: sessionUser.id,
+    role: membership.role as WorkspaceRole,
+  } satisfies TenantContext);
   await next();
 };
 

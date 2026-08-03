@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { createHash } from "node:crypto";
 import { db, webhookEvent, withSystemAccess } from "@wacits/db";
 import { webhookQueue } from "@wacits/queue";
+import { createLogger } from "@wacits/shared";
 import { sql } from "drizzle-orm";
 import { verifySignature } from "./verify-signature";
 
@@ -13,9 +14,27 @@ import { verifySignature } from "./verify-signature";
  * is harmless (see apps/workers).
  */
 const app = new Hono();
+const log = createLogger("webhook");
 
 const META_APP_SECRET = process.env.META_APP_SECRET;
 const META_WEBHOOK_VERIFY_TOKEN = process.env.META_WEBHOOK_VERIFY_TOKEN;
+
+// AU-2: same request-id convention as the API (apps/api/src/middleware/
+// request-id.ts) — kept inline here rather than shared, since it's a
+// three-line concern and each of these small services already stands alone.
+app.use(async (c, next) => {
+  const incoming = c.req.header("x-request-id");
+  const id = incoming && incoming.length <= 128 ? incoming : crypto.randomUUID();
+  c.set("requestId", id);
+  c.header("x-request-id", id);
+  await next();
+});
+
+declare module "hono" {
+  interface ContextVariableMap {
+    requestId: string;
+  }
+}
 
 app.get("/health", async (c) => {
   try {
@@ -40,19 +59,20 @@ app.get("/", (c) => {
 });
 
 app.post("/", async (c) => {
+  const requestId = c.get("requestId");
   // AR-6: verify over the EXACT raw bytes — never re-serialise parsed JSON.
   const rawBody = await c.req.text();
   const signatureHeader = c.req.header("x-hub-signature-256");
 
   if (!META_APP_SECRET) {
-    console.error("META_APP_SECRET is not set; refusing to process webhook (see .env.example / TS-8).");
+    log.error({ requestId }, "META_APP_SECRET is not set; refusing to process webhook (see .env.example / TS-8)");
     return c.text("Server misconfigured", 500);
   }
 
   const verified = verifySignature(rawBody, signatureHeader, META_APP_SECRET);
   if (!verified) {
     // AR-7: reject without processing, count as a security metric.
-    console.warn("Webhook signature verification failed — rejecting without processing.");
+    log.warn({ requestId }, "webhook signature verification failed — rejecting without processing");
     return c.text("Invalid signature", 403);
   }
 
@@ -92,7 +112,7 @@ app.post("/", async (c) => {
   try {
     await webhookQueue.add(
       "webhook",
-      { webhookEventId: stored.id },
+      { webhookEventId: stored.id, correlationId: requestId },
       {
         // BullMQ rejects a custom job id containing ':' unless it has
         // exactly three colon-separated parts, so use the bare event UUID —
@@ -105,7 +125,7 @@ app.post("/", async (c) => {
       },
     );
   } catch (err) {
-    console.error("[webhook] failed to enqueue for processing (event is stored and replayable):", err);
+    log.error({ requestId, err, webhookEventId: stored.id }, "failed to enqueue for processing (event is stored and replayable)");
   }
 
   // AR-4: acknowledge fast. Everything above this line is signature
@@ -113,8 +133,13 @@ app.post("/", async (c) => {
   return c.text("EVENT_RECEIVED", 200);
 });
 
+app.onError((err, c) => {
+  log.error({ requestId: c.get("requestId"), err }, "unhandled error");
+  return c.text("Internal server error", 500);
+});
+
 const port = Number(process.env.WEBHOOK_PORT ?? 8788);
-console.log(`Webhook receiver listening on :${port}`);
+log.info({ port }, "webhook receiver listening");
 
 export default {
   port,

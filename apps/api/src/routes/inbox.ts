@@ -9,8 +9,8 @@ import {
   withTenant,
 } from "@wacits/db";
 import { formatPhoneForDisplay, normalisePhone } from "@wacits/shared";
-import { getOperatorUserId } from "../lib/operator";
 import { getServiceWindow, resolveSender, sendOutbound, SendBlockedError } from "../lib/sending";
+import { requirePermission } from "../middleware/permission";
 
 /**
  * PRD §14 Inbox — one-to-one conversations. The single rule that shapes
@@ -23,7 +23,7 @@ import { getServiceWindow, resolveSender, sendOutbound, SendBlockedError } from 
 const inbox = new Hono();
 
 /** Conversation list, newest activity first, with the contact joined in. */
-inbox.get("/conversations", async (c) => {
+inbox.get("/conversations", requirePermission("view_inbox"), async (c) => {
   const { clientId } = c.get("tenant");
   const state = c.req.query("state"); // 'open' | 'closed'
   const q = c.req.query("q")?.trim();
@@ -101,7 +101,7 @@ inbox.get("/conversations", async (c) => {
 });
 
 /** One conversation with its full message thread, oldest first. */
-inbox.get("/conversations/:id", async (c) => {
+inbox.get("/conversations/:id", requirePermission("view_inbox"), async (c) => {
   const { clientId } = c.get("tenant");
   const id = c.req.param("id");
 
@@ -166,7 +166,7 @@ inbox.get("/conversations/:id", async (c) => {
  * Sends a reply in an existing conversation. Accepts either free text
  * (window must be open) or a template (always allowed).
  */
-inbox.post("/conversations/:id/messages", async (c) => {
+inbox.post("/conversations/:id/messages", requirePermission("reply_in_inbox"), async (c) => {
   const { clientId } = c.get("tenant");
   const id = c.req.param("id");
   const body = await c.req.json<{
@@ -230,7 +230,7 @@ inbox.post("/conversations/:id/messages", async (c) => {
  * this number, free text is impossible and a template is required. The
  * response says so explicitly rather than failing opaquely.
  */
-inbox.post("/start", async (c) => {
+inbox.post("/start", requirePermission("reply_in_inbox"), async (c) => {
   const { clientId } = c.get("tenant");
   const body = await c.req.json<{
     phoneNumber: string;
@@ -335,15 +335,14 @@ inbox.post("/start", async (c) => {
   }
 });
 
-inbox.post("/conversations/:id/state", async (c) => {
-  const { clientId } = c.get("tenant");
+inbox.post("/conversations/:id/state", requirePermission("reply_in_inbox"), async (c) => {
+  const { clientId, userId } = c.get("tenant");
   const body = await c.req.json<{ state: "open" | "closed" }>();
-  const operatorUserId = await getOperatorUserId();
 
   const row = await withTenant(clientId, async (tx) => {
     const [updated] = await tx
       .update(conversation)
-      .set({ state: body.state, stateChangedAt: new Date(), stateChangedBy: operatorUserId })
+      .set({ state: body.state, stateChangedAt: new Date(), stateChangedBy: userId })
       .where(eq(conversation.id, c.req.param("id")))
       .returning({ id: conversation.id, state: conversation.state });
     return updated;
@@ -353,16 +352,15 @@ inbox.post("/conversations/:id/state", async (c) => {
   return c.json(row);
 });
 
-inbox.post("/conversations/:id/notes", async (c) => {
-  const { clientId } = c.get("tenant");
+inbox.post("/conversations/:id/notes", requirePermission("reply_in_inbox"), async (c) => {
+  const { clientId, userId } = c.get("tenant");
   const body = await c.req.json<{ body: string }>();
   if (!body.body?.trim()) return c.json({ error: "body is required" }, 400);
-  const operatorUserId = await getOperatorUserId();
 
   const row = await withTenant(clientId, async (tx) => {
     const [created] = await tx
       .insert(conversationNote)
-      .values({ clientId, conversationId: c.req.param("id"), authorId: operatorUserId, body: body.body.trim() })
+      .values({ clientId, conversationId: c.req.param("id"), authorId: userId, body: body.body.trim() })
       .returning();
     return created;
   });
@@ -370,7 +368,7 @@ inbox.post("/conversations/:id/notes", async (c) => {
 });
 
 /** Canned replies (§14) — the shortcuts agents actually live on. */
-inbox.get("/quick-replies", async (c) => {
+inbox.get("/quick-replies", requirePermission("view_inbox"), async (c) => {
   const { clientId } = c.get("tenant");
   return c.json(
     await withTenant(clientId, async (tx) => {
@@ -384,7 +382,7 @@ inbox.get("/quick-replies", async (c) => {
   );
 });
 
-inbox.post("/quick-replies", async (c) => {
+inbox.post("/quick-replies", requirePermission("manage_quick_replies"), async (c) => {
   const { clientId } = c.get("tenant");
   const body = await c.req.json<{ title: string; shortcut: string; body: string; category?: string }>();
   if (!body.title?.trim() || !body.shortcut?.trim() || !body.body?.trim()) {

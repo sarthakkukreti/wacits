@@ -17,8 +17,11 @@ import {
   withSystemAccess,
 } from "@wacits/db";
 import { createHash } from "node:crypto";
-import { fromWhatsAppId } from "@wacits/shared";
+import { createLogger, fromWhatsAppId } from "@wacits/shared";
 import { classifyError } from "./lib/error-classification";
+import { startWorkerHealthServer } from "./lib/health";
+
+const log = createLogger("webhook-worker");
 
 /**
  * PRD §4.2 (b)/(c), §14 — interprets the raw webhook payloads the receiver
@@ -153,7 +156,7 @@ async function processInboundMessages(tx: any, value: any) {
 
   const sender = await resolveSenderByPhoneNumberId(tx, metaPhoneNumberId);
   if (!sender) {
-    console.warn(`[webhook-worker] inbound for unknown phone_number_id ${metaPhoneNumberId} — ignoring.`);
+    log.warn({ metaPhoneNumberId }, "inbound for unknown phone_number_id — ignoring");
     return;
   }
 
@@ -306,7 +309,7 @@ async function processStatuses(tx: any, value: any, rawPayload: unknown) {
     if (!msgRow) {
       // The status can legitimately arrive before our own INSERT commits.
       // The raw event is retained, so this is recoverable by reprocessing.
-      console.warn(`[webhook-worker] status for unknown wamid ${wamid} — will be picked up on reprocess.`);
+      log.warn({ wamid }, "status for unknown wamid — will be picked up on reprocess");
       continue;
     }
 
@@ -432,7 +435,7 @@ async function processStatuses(tx: any, value: any, rawPayload: unknown) {
 const worker = new Worker<WebhookJobData>(
   "webhook",
   async (job) => {
-    const { webhookEventId } = job.data;
+    const { webhookEventId, correlationId } = job.data;
 
     await withSystemAccess(async (tx) => {
       const [event] = await tx.select().from(webhookEvent).where(eq(webhookEvent.id, webhookEventId)).limit(1);
@@ -443,6 +446,7 @@ const worker = new Worker<WebhookJobData>(
       try {
         parsed = JSON.parse(event.rawBody);
       } catch {
+        log.warn({ correlationId, webhookEventId }, "webhook body is not valid JSON — marking failed");
         await tx
           .update(webhookEvent)
           .set({ processingState: "failed", lastError: "Body is not valid JSON" })
@@ -490,7 +494,8 @@ const worker = new Worker<WebhookJobData>(
 );
 
 worker.on("failed", (job, err) => {
-  console.error(`[webhook-worker] job ${job?.id} failed:`, err.message);
+  log.error({ jobId: job?.id, correlationId: job?.data?.correlationId, err: err.message }, "job failed");
 });
 
-console.log("Webhook worker running.");
+startWorkerHealthServer(Number(process.env.WEBHOOK_WORKER_PORT ?? 8793), worker);
+log.info("webhook worker running");

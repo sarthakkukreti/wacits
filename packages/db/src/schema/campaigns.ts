@@ -1,4 +1,5 @@
-import { integer, jsonb, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { index, integer, jsonb, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
 import { createdAt, id, tsCol, updatedAt, utcNow } from "./columns.helpers";
 import { campaignState, recipientState, sendPath } from "./enums";
 import { client, senderNumber } from "./platform";
@@ -11,42 +12,54 @@ import { campaignType } from "./settings";
 // states; `halted` and `blocked_by_client_status` do not exist (§12.2).
 // Approval fields are non-null only once the recipient count reached the
 // campaign approval threshold (DM-25).
-export const campaign = pgTable("campaign", {
-  id: id(),
-  clientId: uuid("client_id").notNull().references(() => client.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  campaignTypeId: uuid("campaign_type_id").references(() => campaignType.id),
-  senderNumberId: uuid("sender_number_id").notNull().references(() => senderNumber.id),
-  templateVersionId: uuid("template_version_id").notNull().references(() => templateVersion.id),
-  sendPath: sendPath("send_path").notNull().default("cloud_api"),
-  optimisationSpec: jsonb("optimisation_spec"), // nullable — reserved for MM Lite max-price bidding
-  scheduledAt: tsCol("scheduled_at"),
-  state: campaignState("state").notNull().default("draft"),
-  stateChangedAt: tsCol("state_changed_at"),
-  pauseReason: text("pause_reason"),
-  stopReason: text("stop_reason"),
-  // DM-25 — campaign approval workflow.
-  approvalRequestedBy: uuid("approval_requested_by").references(() => user.id),
-  approvalRequestedAt: tsCol("approval_requested_at"),
-  approvedBy: uuid("approved_by").references(() => user.id),
-  approvedAt: tsCol("approved_at"),
-  approvalNote: text("approval_note"),
-  typedConfirmationGivenBy: uuid("typed_confirmation_given_by").references(() => user.id),
-  typedConfirmationGivenAt: tsCol("typed_confirmation_given_at"),
-  countQueued: integer("count_queued").notNull().default(0),
-  countAccepted: integer("count_accepted").notNull().default(0),
-  countSent: integer("count_sent").notNull().default(0),
-  countDelivered: integer("count_delivered").notNull().default(0),
-  countRead: integer("count_read").notNull().default(0),
-  countFailed: integer("count_failed").notNull().default(0),
-  droppedByPacingCount: integer("dropped_by_pacing_count").notNull().default(0),
-  blockedByFrequencyCapCount: integer("blocked_by_frequency_cap_count").notNull().default(0),
-  costEstimate: integer("cost_estimate"), // paise
-  costActual: integer("cost_actual"), // paise
-  createdBy: uuid("created_by").references(() => user.id),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+export const campaign = pgTable(
+  "campaign",
+  {
+    id: id(),
+    clientId: uuid("client_id").notNull().references(() => client.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    campaignTypeId: uuid("campaign_type_id").references(() => campaignType.id),
+    senderNumberId: uuid("sender_number_id").notNull().references(() => senderNumber.id),
+    templateVersionId: uuid("template_version_id").notNull().references(() => templateVersion.id),
+    sendPath: sendPath("send_path").notNull().default("cloud_api"),
+    optimisationSpec: jsonb("optimisation_spec"), // nullable — reserved for MM Lite max-price bidding
+    scheduledAt: tsCol("scheduled_at"),
+    state: campaignState("state").notNull().default("draft"),
+    stateChangedAt: tsCol("state_changed_at"),
+    pauseReason: text("pause_reason"),
+    stopReason: text("stop_reason"),
+    // DM-25 — campaign approval workflow.
+    approvalRequestedBy: uuid("approval_requested_by").references(() => user.id),
+    approvalRequestedAt: tsCol("approval_requested_at"),
+    approvedBy: uuid("approved_by").references(() => user.id),
+    approvedAt: tsCol("approved_at"),
+    approvalNote: text("approval_note"),
+    typedConfirmationGivenBy: uuid("typed_confirmation_given_by").references(() => user.id),
+    typedConfirmationGivenAt: tsCol("typed_confirmation_given_at"),
+    countQueued: integer("count_queued").notNull().default(0),
+    countAccepted: integer("count_accepted").notNull().default(0),
+    countSent: integer("count_sent").notNull().default(0),
+    countDelivered: integer("count_delivered").notNull().default(0),
+    countRead: integer("count_read").notNull().default(0),
+    countFailed: integer("count_failed").notNull().default(0),
+    droppedByPacingCount: integer("dropped_by_pacing_count").notNull().default(0),
+    blockedByFrequencyCapCount: integer("blocked_by_frequency_cap_count").notNull().default(0),
+    costEstimate: integer("cost_estimate"), // paise
+    costActual: integer("cost_actual"), // paise
+    createdBy: uuid("created_by").references(() => user.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // Serves the approval-queue dashboard (PRD RP-13): list campaigns awaiting
+    // approval, oldest request first. Not yet queried by application code —
+    // the approval workflow itself is Phase 2 — added now per DM-14's index
+    // spec since the schema columns already exist.
+    index("campaign_pending_approval_idx")
+      .on(t.approvalRequestedAt)
+      .where(sql`${t.state} = 'pending_approval'`),
+  ],
+);
 
 // PRD §21.4 campaign_audience_snapshot — append-only, frozen record of who
 // the audience was and how it was chosen. Makes a campaign reproducible.
@@ -95,5 +108,9 @@ export const campaignRecipient = pgTable(
       t.attemptKey,
     ),
     unique("campaign_recipient_send_id_unique").on(t.sendId),
+    // Serves the repeated WHERE campaign_id = ? AND state = ? pattern used for
+    // recipient counts by state, the failure list, and pending-recipient
+    // lookups (apps/api/src/routes/campaigns.ts, e.g. lines ~197, 206, 232, 396, 465).
+    index("campaign_recipient_campaign_state_idx").on(t.campaignId, t.state),
   ],
 );

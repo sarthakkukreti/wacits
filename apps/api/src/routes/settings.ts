@@ -9,6 +9,8 @@ import {
   withTenant,
 } from "@wacits/db";
 import { DEFAULT_REGION, encryptToken, maskToken, normalisePhone } from "@wacits/shared";
+import { requirePermission } from "../middleware/permission";
+import { writeAuditLog } from "../lib/audit";
 
 /**
  * Settings — connecting this workspace to Meta. PRD §7 (sender numbers) and
@@ -69,8 +71,8 @@ settings.get("/sender-numbers", async (c) => {
  * come straight out of Meta's dashboard once the number is registered
  * there — this does not create anything at Meta, it records what exists.
  */
-settings.post("/sender-numbers", async (c) => {
-  const { clientId } = c.get("tenant");
+settings.post("/sender-numbers", requirePermission("add_whatsapp_number"), async (c) => {
+  const { clientId, userId } = c.get("tenant");
   const body = await c.req.json<{
     metaPhoneNumberId: string;
     displayPhoneNumber: string;
@@ -160,6 +162,13 @@ settings.post("/sender-numbers", async (c) => {
           keyVersion,
           label: body.tokenLabel ?? `WABA token`,
         });
+        await writeAuditLog(tx, {
+          clientId,
+          actorUserId: userId,
+          action: "sender_token_stored",
+          entityType: "sender_number",
+          entityId: created.id,
+        });
       }
       return created;
     });
@@ -178,8 +187,8 @@ settings.post("/sender-numbers", async (c) => {
 });
 
 /** Replaces the stored token for a sender number. */
-settings.post("/sender-numbers/:id/token", async (c) => {
-  const { clientId } = c.get("tenant");
+settings.post("/sender-numbers/:id/token", requirePermission("add_whatsapp_number"), async (c) => {
+  const { clientId, userId } = c.get("tenant");
   const id = c.req.param("id");
   const body = await c.req.json<{ token: string; label?: string }>();
   if (!body.token?.trim()) return c.json({ error: "token is required" }, 400);
@@ -216,6 +225,13 @@ settings.post("/sender-numbers/:id/token", async (c) => {
       encryptedTokenValue: value,
       keyVersion,
       label: body.label ?? "Rotated WABA token",
+    });
+    await writeAuditLog(tx, {
+      clientId,
+      actorUserId: userId,
+      action: "sender_token_rotated",
+      entityType: "sender_number",
+      entityId: id,
     });
     return true;
   });
