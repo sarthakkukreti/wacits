@@ -9,7 +9,14 @@ export const dynamic = "force-dynamic";
 export default async function ContactsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; page?: string; deliverability?: string; groupId?: string; tagId?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    page?: string;
+    deliverability?: string;
+    groupId?: string;
+    tagId?: string;
+    errorCode?: string;
+  }>;
 }) {
   const sp = await searchParams;
   const page = Number(sp.page ?? 1);
@@ -22,12 +29,13 @@ export default async function ContactsPage({
     deliverability: sp.deliverability,
     groupId: sp.groupId,
     tagId: sp.tagId,
+    errorCode: sp.errorCode,
   };
 
   const query = new URLSearchParams({ page: String(page), pageSize: "50" });
   for (const [key, value] of Object.entries(filter)) if (value) query.set(key, value);
 
-  const [list, stats, groupList, tagList] = await Promise.all([
+  const [list, stats, groupList, tagList, errorCodes] = await Promise.all([
     apiSafe<{ contacts: ContactRow[]; total: number; page: number; pageSize: number }>(
       `/workspace/contacts?${query.toString()}`,
     ),
@@ -36,11 +44,12 @@ export default async function ContactsPage({
     ),
     apiSafe<{ groups: (LabelRef & { memberCount: number })[] }>("/workspace/contacts/meta/groups"),
     apiSafe<{ tags: (LabelRef & { contactCount: number })[] }>("/workspace/contacts/meta/tags"),
+    apiSafe<{ codes: { code: string; title: string; errorClass: string }[] }>("/workspace/messages/error-codes"),
   ]);
 
   const groups = groupList.ok ? groupList.data.groups : [];
   const tags = tagList.ok ? tagList.data.tags : [];
-  const filtered = Boolean(sp.q || sp.deliverability || sp.groupId || sp.tagId);
+  const filtered = Boolean(sp.q || sp.deliverability || sp.groupId || sp.tagId || sp.errorCode);
 
   return (
     <>
@@ -122,6 +131,15 @@ export default async function ContactsPage({
                 <option value="unknown">Not yet contacted</option>
                 <option value="suspect">Suspect</option>
                 <option value="invalid">Invalid</option>
+              </select>
+              <select name="errorCode" defaultValue={sp.errorCode ?? ""} style={{ width: 220 }}>
+                <option value="">Any error code</option>
+                {errorCodes.ok &&
+                  errorCodes.data.codes.map((ec) => (
+                    <option key={ec.code} value={ec.code}>
+                      {ec.code} — {ec.title}
+                    </option>
+                  ))}
               </select>
               <button type="submit" className="btn">
                 Filter

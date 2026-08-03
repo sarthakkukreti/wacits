@@ -92,6 +92,7 @@ export type ContactFilter = {
   deliverability?: string;
   tagId?: string;
   groupId?: string;
+  errorCode?: string;
 };
 
 export type BulkTarget = { contactIds: string[] } | { filter: ContactFilter };

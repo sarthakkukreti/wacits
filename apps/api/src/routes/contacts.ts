@@ -7,6 +7,7 @@ import {
   contactGroupMember,
   contactTag,
   contactType,
+  message,
   suppressionEntry,
   tag,
   withTenant,
@@ -32,6 +33,10 @@ type ContactFilter = {
   deliverability?: string;
   tagId?: string;
   groupId?: string;
+  /** Matches contacts with at least one message that failed with this exact
+   *  Meta error code (message.failed_error_code) — e.g. cleaning up 131026
+   *  ("probable invalid contact") hits after a campaign, scoped to a group. */
+  errorCode?: string;
 };
 
 /**
@@ -71,6 +76,13 @@ function contactWhere(tx: any, f: ContactFilter) {
       .where(eq(contactGroupMember.groupId, f.groupId));
     filters.push(inArray(contact.id, grouped));
   }
+  if (f.errorCode) {
+    const failed = tx
+      .select({ id: message.contactId })
+      .from(message)
+      .where(eq(message.failedErrorCode, f.errorCode));
+    filters.push(inArray(contact.id, failed));
+  }
 
   return and(...filters);
 }
@@ -81,6 +93,7 @@ function filterFromQuery(c: any): ContactFilter {
     deliverability: c.req.query("deliverability"),
     tagId: c.req.query("tagId"),
     groupId: c.req.query("groupId"),
+    errorCode: c.req.query("errorCode"),
   };
 }
 
