@@ -166,7 +166,11 @@ settings.post("/sender-numbers", async (c) => {
 
     return c.json({ senderNumber: { ...row, tokenPreview: body.token ? maskToken(body.token) : null } }, 201);
   } catch (err: any) {
-    if (String(err?.message ?? err).includes("sender_number_meta_phone_id_unique")) {
+    // Drizzle wraps the driver error (`Failed query: insert into ...` as
+    // .message) with the real PostgresError on .cause — matching on the
+    // wrapper's message here would never see the constraint name.
+    const cause = err?.cause ?? err;
+    if (cause?.code === "23505" && cause?.constraint_name === "sender_number_meta_phone_id_unique") {
       return c.json({ error: "This Meta phone number id is already registered." }, 409);
     }
     throw err;

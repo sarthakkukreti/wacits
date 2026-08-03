@@ -268,7 +268,11 @@ contacts.post("/", async (c) => {
     });
     return c.json({ contact: row }, 201);
   } catch (err: any) {
-    if (String(err?.message ?? err).includes("contact_client_phone_unique")) {
+    // Drizzle wraps the driver error (`Failed query: insert into ...` as
+    // .message) with the real PostgresError on .cause — matching on the
+    // wrapper's message here would never see the constraint name.
+    const cause = err?.cause ?? err;
+    if (cause?.code === "23505" && cause?.constraint_name === "contact_client_phone_unique") {
       return c.json({ error: "A contact with this phone number already exists in this workspace." }, 409);
     }
     throw err;
@@ -589,7 +593,8 @@ contacts.patch("/meta/groups/:groupId", async (c) => {
     if (!row) return c.json({ error: "Group not found" }, 404);
     return c.json({ group: row });
   } catch (err: any) {
-    if (String(err?.message ?? err).includes("contact_group_client_name_unique")) {
+    const cause = err?.cause ?? err;
+    if (cause?.code === "23505" && cause?.constraint_name === "contact_group_client_name_unique") {
       return c.json({ error: "A group with that name already exists." }, 409);
     }
     throw err;
@@ -750,7 +755,8 @@ contacts.patch("/meta/tags/:tagId", async (c) => {
     if (!row) return c.json({ error: "Label not found" }, 404);
     return c.json({ tag: row });
   } catch (err: any) {
-    if (String(err?.message ?? err).includes("tag_client_name_unique")) {
+    const cause = err?.cause ?? err;
+    if (cause?.code === "23505" && cause?.constraint_name === "tag_client_name_unique") {
       return c.json({ error: "A label with that name already exists." }, 409);
     }
     throw err;
