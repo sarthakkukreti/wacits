@@ -12,6 +12,8 @@ type ConversationSummary = {
   unreadCount: number;
   lastMessage: string | null;
   lastMessageAt: string | null;
+  /** Set the first time this contact replies; null if they never have. */
+  lastInboundAt: string | null;
 };
 
 export default async function InboxLayout({ children }: { children: React.ReactNode }) {

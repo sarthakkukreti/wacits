@@ -13,12 +13,21 @@ type ConversationSummary = {
   unreadCount: number;
   lastMessage: string | null;
   lastMessageAt: string | null;
+  /** Set the first time this contact replies; null if they never have. */
+  lastInboundAt: string | null;
 };
+
+const FILTERS = [
+  { key: "all", label: "All" },
+  { key: "unread", label: "Unread" },
+  { key: "open", label: "Open" },
+  { key: "replied", label: "Replies received" },
+] as const;
 
 export function ConversationList({ conversations }: { conversations: ConversationSummary[] }) {
   const params = useParams<{ id?: string }>();
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<"all" | "unread" | "open">("all");
+  const [filter, setFilter] = useState<(typeof FILTERS)[number]["key"]>("all");
 
   // Filtering client-side keeps typing instant. The server already caps the
   // list at 100, so this stays cheap; a workspace past that would want the
@@ -28,6 +37,7 @@ export function ConversationList({ conversations }: { conversations: Conversatio
     return conversations.filter((c) => {
       if (filter === "unread" && !c.unreadCount) return false;
       if (filter === "open" && c.state !== "open") return false;
+      if (filter === "replied" && !c.lastInboundAt) return false;
       if (!q) return true;
       return (
         c.displayName.toLowerCase().includes(q) ||
@@ -47,9 +57,9 @@ export function ConversationList({ conversations }: { conversations: Conversatio
           onChange={(e) => setQuery(e.target.value)}
         />
         <div className="tabs mt-8" style={{ marginBottom: 0, borderBottom: "none" }}>
-          {(["all", "unread", "open"] as const).map((f) => (
-            <button key={f} className={filter === f ? "active" : ""} onClick={() => setFilter(f)} type="button">
-              {f === "all" ? "All" : f === "unread" ? "Unread" : "Open"}
+          {FILTERS.map((f) => (
+            <button key={f.key} className={filter === f.key ? "active" : ""} onClick={() => setFilter(f.key)} type="button">
+              {f.label}
             </button>
           ))}
         </div>
